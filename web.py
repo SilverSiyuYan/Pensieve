@@ -250,6 +250,24 @@ def export_calendar():
         headers={'Content-Disposition': 'attachment; filename=pensieve_tasks.ics'}
     )
     return response
+@app.route('/api/idea/evaluate', methods=['POST'])
+@login_required
+def evaluate_idea():
+    """灵感联网评估接口（框架）"""
+    data = request.json or {}
+    idea = data.get('idea', '').strip()
+    if not idea:
+        return jsonify({'error': '灵感内容不能为空'}), 400
+    
+    # TODO: 1. 提取关键词
+    # TODO: 2. 联网搜索
+    # TODO: 3. LLM生成评估报告
+    
+    return jsonify({
+        'idea': idea,
+        'status': 'processing',
+        'message': '功能开发中，请配置搜索API'
+    })
 
 if __name__ == '__main__':
     print('=' * 48)

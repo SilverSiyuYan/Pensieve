@@ -213,6 +213,43 @@ def delete_memory(rid):
         db.commit()
     return jsonify({'ok': bool(cur.rowcount)})
 
+##新增日历接口
+@app.route('/api/export_calendar', methods=['GET'])
+@login_required
+def export_calendar():
+    """导出当前用户所有带日期的记忆为 .ics 日历文件"""
+    uid = session['uid']
+    db = get_db()
+    
+    rows = db.execute(
+        'SELECT id, content, event_date FROM records WHERE user_id = ? AND event_date IS NOT NULL ORDER BY event_date',
+        (uid,)
+    ).fetchall()
+    
+    if not rows:
+        return jsonify({'error': '没有可导出的任务'}), 404
+    
+    ics_lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Pensieve//CN',
+        'CALSCALE:GREGORIAN'
+    ]
+    for r in rows:
+        date_str = r['event_date'].replace('-', '')
+        ics_lines.append('BEGIN:VEVENT')
+        ics_lines.append(f'SUMMARY:{r["content"][:50]}')
+        ics_lines.append(f'DTSTART;VALUE=DATE:{date_str}')
+        ics_lines.append(f'DTEND;VALUE=DATE:{date_str}')
+        ics_lines.append('END:VEVENT')
+    ics_lines.append('END:VCALENDAR')
+    
+    response = app.response_class(
+        '\n'.join(ics_lines),
+        mimetype='text/calendar',
+        headers={'Content-Disposition': 'attachment; filename=pensieve_tasks.ics'}
+    )
+    return response
 
 if __name__ == '__main__':
     print('=' * 48)
@@ -221,3 +258,4 @@ if __name__ == '__main__':
     print('  按 Ctrl+C 停止')
     print('=' * 48)
     app.run(host='127.0.0.1', port=5000, debug=False)
+    

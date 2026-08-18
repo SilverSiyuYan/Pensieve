@@ -604,6 +604,28 @@ def main():
     elif args.cmd == 'export':
         export_jsonl(conn, args.output, user_id=args.user)
 
+# ---------- 记忆管理相关函数（新增） ----------
+
+def get_memories_by_user(db, uid):
+    """获取某个用户的所有记忆，按时间倒序"""
+    cur = db.execute('''
+        SELECT id, content, category, summary, tags, created_at 
+        FROM memories 
+        WHERE uid = ? 
+        ORDER BY created_at DESC
+    ''', (uid,))
+    rows = cur.fetchall()
+    # 把 sqlite3.Row 对象转成字典列表
+    return [dict(row) for row in rows]
+
+def delete_memory_by_id(db, memory_id, uid):
+    """
+    删除指定记忆（必须同时传入 uid，防止删别人的）
+    返回：True 表示删除了，False 表示没找到或无权限
+    """
+    cur = db.execute('DELETE FROM memories WHERE id = ? AND uid = ?', (memory_id, uid))
+    db.commit()
+    return cur.rowcount > 0
 
 if __name__ == '__main__':
     main()

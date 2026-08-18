@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的记忆库</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui; max-width: 800px; margin: 30px auto; padding: 0 20px; background: #f1f5f9; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; background: white; padding: 16px 24px; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.04); }
+        .header h1 { font-size: 22px; color: #0f172a; }
+        .header a { color: #2563eb; text-decoration: none; font-weight: 500; }
+        .memory-card { background: white; border-radius: 12px; padding: 14px 18px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 6px rgba(0,0,0,0.04); border-left: 4px solid #e2e8f0; }
+        .memory-card.cat-任务 { border-left-color: #3b82f6; }
+        .memory-card.cat-灵感 { border-left-color: #ec4899; }
+        .memory-card.cat-感悟 { border-left-color: #10b981; }
+        .memory-card .info { flex: 1; }
+        .memory-card .category { font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 12px; background: #e2e8f0; display: inline-block; margin-bottom: 4px; }
+        .memory-card .text { font-size: 15px; font-weight: 500; margin: 4px 0; color: #0f172a; }
+        .memory-card .meta { font-size: 12px; color: #94a3b8; }
+        .btn-delete { background: #fee2e2; border: none; color: #b91c1c; padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; transition: 0.2s; }
+        .btn-delete:hover { background: #fecaca; }
+        .empty { text-align: center; color: #94a3b8; padding: 60px 0; }
+        .loading { text-align: center; color: #94a3b8; padding: 40px 0; }
+        .toast { position: fixed; bottom: 20px; right: 20px; background: #0f172a; color: white; padding: 10px 24px; border-radius: 8px; opacity: 0; transition: 0.3s; font-size: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .toast.show { opacity: 1; }
+        .toast.error { background: #b91c1c; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>📚 我的记忆库</h1>
+        <a href="/">← 返回对话</a>
+    </div>
+
+    <div id="memoryList"><div class="loading">⏳ 加载中...</div></div>
+    <div id="toast" class="toast"></div>
+
+    <script>
+        async function loadMemories() {
+            const container = document.getElementById('memoryList');
+            try {
+                const res = await fetch('/api/memories');
+                if (!res.ok) {
+                    if (res.status === 401) {
+                        container.innerHTML = '<div class="empty">🔒 请先 <a href="/login">登录</a></div>';
+                        return;
+                    }
+                    throw new Error('加载失败');
+                }
+                const data = await res.json();
+                if (data.length === 0) {
+                    container.innerHTML = '<div class="empty">🌱 还没有记忆，去聊聊天吧</div>';
+                    return;
+                }
+                container.innerHTML = data.map(m => {
+                    const time = new Date(m.created_at).toLocaleString('zh-CN');
+                    return `
+                        <div class="memory-card cat-${m.category}" data-id="${m.id}">
+                            <div class="info">
+                                <span class="category">${m.category}</span>
+                                <div class="text">${escapeHtml(m.content)}</div>
+                                <div class="meta">${m.summary || ''} · ${m.tags || ''} · ${time}</div>
+                            </div>
+                            <button class="btn-delete" onclick="deleteMemory(${m.id})">删除</button>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                container.innerHTML = '<div class="empty">⚠️ 加载失败，请刷新重试</div>';
+            }
+        }
+
+        function escapeHtml(text) {
+            const d = document.createElement('div');
+            d.textContent = text;
+            return d.innerHTML;
+        }
+
+        async function deleteMemory(id) {
+            if (!confirm('确定要删除这条记忆吗？')) return;
+            try {
+                const res = await fetch(`/api/memories/${id}`, { method: 'DELETE' });
+                const result = await res.json();
+                if (res.ok && result.success) {
+                    showToast('✅ 已删除', 'success');
+                    const card = document.querySelector(`.memory-card[data-id="${id}"]`);
+                    if (card) card.remove();
+                    if (!document.querySelector('.memory-card')) {
+                        document.getElementById('memoryList').innerHTML = '<div class="empty">🌱 已清空</div>';
+                    }
+                } else {
+                    showToast('❌ ' + (result.error || '删除失败'), 'error');
+                }
+            } catch (e) {
+                showToast('❌ 网络错误，请重试', 'error');
+            }
+        }
+
+        function showToast(msg, type = 'success') {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = 'toast';
+            if (type === 'error') t.classList.add('error');
+            t.classList.add('show');
+            clearTimeout(t._timer);
+            t._timer = setTimeout(() => t.classList.remove('show'), 2500);
+        }
+
+        loadMemories();
+    </script>
+</body>
+</html>

@@ -256,6 +256,35 @@ def export_calendar():
     )
     return response
 
+#管理页面路由（显示 HTML 页面）==============================
+@app.route('/manage')
+def manage_page():
+    if 'uid' not in session:
+        return redirect('/login')  # 跳转到你们现有的登录页
+    return render_template('manage.html')
+#获取记忆列表的 API
+@app.route('/api/memories', methods=['GET'])
+def api_get_memories():
+    uid = session.get('uid')
+    if not uid:
+        return jsonify({'error': '未登录'}), 401
+    
+    db = get_db()
+    memories = get_memories_by_user(db, uid)
+    return jsonify(memories)
+#删除记忆的 API
+@app.route('/api/memories/<int:memory_id>', methods=['DELETE'])
+def api_delete_memory(memory_id):
+    uid = session.get('uid')
+    if not uid:
+        return jsonify({'error': '未登录'}), 401
+    
+    db = get_db()
+    success = delete_memory_by_id(db, memory_id, uid)
+    if success:
+        return jsonify({'success': True, 'message': '已删除'})
+    else:
+        return jsonify({'error': '记忆不存在或无权限'}), 404
 
 # ============================================================
 # 新增：智谱 Web Search API（非 MCP）

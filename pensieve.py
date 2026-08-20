@@ -639,5 +639,43 @@ def delete_memory_by_id(db, memory_id, uid):
     db.commit()
     return cur.rowcount > 0
 
+def classify_triple(text: str) -> str:
+    """
+    对文本进行三级分类：返回 '任务' / '灵感' / '感悟'
+    优先 LLM，失败则规则降级
+    """
+    # 1. 尝试 LLM（复用已有的 llm_chat）
+    if llm_available():
+        try:
+            prompt = """你是一个严格的记忆分类助手。请判断以下内容属于哪一类：
+- 任务：包含具体时间点（明天/下周一/今晚）或明确的待办动作（提醒我/必须/要去做）
+- 灵感：提出新创意、产品构想、解决方案，且无明确执行时间（想做/搞一个/设计/开发）
+- 感悟：记录个人情绪、反思、成长体会，不包含行动指令（觉得/意识到/发现）
+
+只回答一个词：任务、灵感、感悟。不要输出任何其他内容。
+
+内容：{text}"""
+            result = llm_chat(prompt.format(text=text)).strip()
+            if result in ['任务', '灵感', '感悟']:
+                return result
+        except Exception as e:
+            print(f"⚠️ LLM三级分类失败: {e}，降级到规则")
+    
+    # 2. 规则降级（关键词打分）
+    TASK_KW = ['明天', '下周', '今晚', '提醒我', '必须', '截止', '提交', '面试', '开会', '抢票']
+    INSPIRE_KW = ['想做', '设计', '开发', '做一个', '平台', 'App', '工具', '产品', '系统']
+    FEEL_KW = ['觉得', '意识到', '发现', '原来', '焦虑', '害怕', '拖延', '反思', '感悟']
+    
+    score_task = sum(1 for kw in TASK_KW if kw in text)
+    score_inspire = sum(1 for kw in INSPIRE_KW if kw in text)
+    score_feel = sum(1 for kw in FEEL_KW if kw in text)
+    
+    if score_task >= score_inspire and score_task >= score_feel and score_task > 0:
+        return '任务'
+    elif score_inspire >= score_feel and score_inspire > 0:
+        return '灵感'
+    else:
+        return '感悟'  # 默认保底
+
 if __name__ == '__main__':
     main()

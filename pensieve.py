@@ -636,7 +636,7 @@ if __name__ == '__main__':
 # ============================================================
 
 # ----- 配置区（在这里填你的 API Key）-----
-ZHIPU_API_KEY = "你的智谱API Key"   # 替换成你的真实 Key
+ZHIPU_API_KEY = "sk-7zdTvYGXM5mwe8RFh2X5HA"   # 替换成你的真实 Key
 ZHIPU_MODEL = "glm-4-plus"          # 可选：glm-4-flash, glm-4-plus, glm-4-air
 # ---------------------------------------
 

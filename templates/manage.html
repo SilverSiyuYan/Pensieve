@@ -61,7 +61,10 @@
                             <div class="info">
                                 <span class="category">${m.category}</span>
                                 <div class="text">${escapeHtml(m.content)}</div>
-                                <div class="meta">${m.summary || ''} · ${m.tags || ''} · ${time}</div>
+                                <div class="meta">
+                                    <span style="font-weight:600;">🏷️ ${m.category || '未分类'}</span>
+                                    · ${m.summary || ''} · ${m.tags || ''} · ${time}
+                                </div>
                             </div>
                             <button class="btn-delete" onclick="deleteMemory(${m.id})">删除</button>
                         </div>

@@ -14,16 +14,14 @@
     · 每个用户只能看到和检索自己的记忆（user_id 隔离）
     · 会话密钥保存在 .secret_key（自动生成，勿泄露、勿提交 git）
 """
-import re
-import urllib.request
-import urllib.error
+
 import functools
 import json
 import os
 import secrets
 from pathlib import Path
-from flask import Flask, g, jsonify, request, send_file, session, render_template
 
+from flask import Flask, g, jsonify, request, send_file, session
 
 try:
     import pensieve            # 核心文件叫 pensieve.py 时
@@ -196,250 +194,24 @@ def memories():
     rows = get_db().execute(
         'SELECT * FROM records WHERE user_id = ? ORDER BY id DESC LIMIT 50',
         (session['uid'],)).fetchall()
-    
-    # 调试：打印出字段名，确认 category 是否存在
-    if rows:
-        print("DEBUG: 字段列表:", rows[0].keys())
-    
-    result = []
-    for r in rows:
-        # 确保 category 字段存在，如果不存在则设为 "未分类"
-        cat = r['category'] if 'category' in r.keys() and r['category'] else '未分类'
-        result.append({
-            'id': r['id'],
-            'content': r['content'],
-            'created_at': r['created_at'],
-            'event_date': r['event_date'],
-            'tags': json.loads(r['tags']),
-            'category': cat,   # 关键：加上这一行
-        })
-    return jsonify(result)
+    return jsonify([{
+        'id': r['id'], 'content': r['content'],
+        'created_at': r['created_at'], 'event_date': r['event_date'],
+        'tags': json.loads(r['tags']),
+    } for r in rows])
 
 
 @app.route('/api/memories/<int:rid>', methods=['DELETE'])
 @login_required
 def delete_memory(rid):
+    """删除自己的一条记忆（删别人���会返回 ok=false）。"""
     db = get_db()
-    cur = db.execute('DELETE FROM records WHERE id = ? AND user_id = ?', (rid, session['uid']))
-    db.commit()
-    if cur.rowcount > 0:
-        return jsonify({'success': True, 'message': '已删除'})
-    else:
-        return jsonify({'success': False, 'error': '记忆不存在或无权限'}), 404
-
-
-# ============================================================
-# 新增：日历导出接口
-# ============================================================
-@app.route('/api/export_calendar', methods=['GET'])
-@login_required
-def export_calendar():
-    """导出当前用户所有带日期的记忆为 .ics 日历文件"""
-    uid = session['uid']
-    db = get_db()
-    
-    rows = db.execute(
-        'SELECT id, content, event_date FROM records WHERE user_id = ? AND event_date IS NOT NULL ORDER BY event_date',
-        (uid,)
-    ).fetchall()
-    
-    if not rows:
-        return jsonify({'error': '没有可导出的任务'}), 404
-    
-    ics_lines = [
-        'BEGIN:VCALENDAR',
-        'VERSION:2.0',
-        'PRODID:-//Pensieve//CN',
-        'CALSCALE:GREGORIAN'
-    ]
-    for r in rows:
-        date_str = r['event_date'].replace('-', '')
-        ics_lines.append('BEGIN:VEVENT')
-        ics_lines.append(f'SUMMARY:{r["content"][:50]}')
-        ics_lines.append(f'DTSTART;VALUE=DATE:{date_str}')
-        ics_lines.append(f'DTEND;VALUE=DATE:{date_str}')
-        ics_lines.append('END:VEVENT')
-    ics_lines.append('END:VCALENDAR')
-    
-    response = app.response_class(
-        '\n'.join(ics_lines),
-        mimetype='text/calendar',
-        headers={'Content-Disposition': 'attachment; filename=pensieve_tasks.ics'}
-    )
-    return response
-
-#管理页面路由（显示 HTML 页面）==============================
-@app.route('/manage')
-def manage_page():
-    if 'uid' not in session:
-        return redirect('/login')  # 跳转到你们现有的登录页
-    return render_template('manage.html')
-#获取记忆列表的 API
-@app.route('/api/memories', methods=['GET'])
-def api_get_memories():
-    uid = session.get('uid')
-    if not uid:
-        return jsonify({'error': '未登录'}), 401
-    
-    db = get_db()
-    memories = get_memories_by_user(db, uid)
-    return jsonify(memories)
-#删除记忆的 API
-@app.route('/api/memories/<int:memory_id>', methods=['DELETE'])
-def api_delete_memory(memory_id):
-    uid = session.get('uid')
-    if not uid:
-        return jsonify({'error': '未登录'}), 401
-    
-    db = get_db()
-    success = delete_memory_by_id(db, memory_id, uid)
-    if success:
-        return jsonify({'success': True, 'message': '已删除'})
-    else:
-        return jsonify({'error': '记忆不存在或无权限'}), 404
-
-# ============================================================
-# 新增：智谱 Web Search API（非 MCP）
-# ============================================================
-def search_zhipu_web(query: str, api_key: str) -> list:
-    """
-    通过智谱 Web Search API 进行联网搜索
-    官方文档: https://open.bigmodel.cn/api/paas/v4/web_search
-    """
-    url = "https://open.bigmodel.cn/api/paas/v4/web_search"
-    
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    
-    payload = json.dumps({
-        "search_query": query[:70],
-        "search_engine": "search_std",
-        "search_intent": False,
-        "count": 5
-    }).encode('utf-8')
-    
-    req = urllib.request.Request(url, data=payload, headers=headers)
-    
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            result = json.loads(resp.read().decode('utf-8'))
-        
-        search_results = result.get('search_result', [])
-        return [{
-            "title": item.get('title', ''),
-            "snippet": item.get('content', ''),
-            "url": item.get('link', ''),
-            "media": item.get('media', ''),
-            "publish_date": item.get('publish_date', '')
-        } for item in search_results[:5]]
-    
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode('utf-8')
-        print(f"[搜索错误] HTTP {e.code}: {error_body}")
-        return []
-    except Exception as e:
-        print(f"[搜索错误] {e}")
-        return []
-
-
-def generate_report_with_glm(idea: str, search_results: list, api_key: str) -> dict:
-    if not search_results:
-        return {
-            'summary': '未找到相关公开信息，这可能是一个新颖的想法！',
-            'competitors': '未发现直接竞品',
-            'feasibility': '建议进一步调研市场需求',
-            'risk': '暂无公开风险信息',
-            'next_steps': '尝试用不同关键词搜索验证'
-        }
-    
-    search_text = "\n".join([
-        f"- {item.get('title', '')}: {item.get('snippet', '')[:100]}"
-        for item in search_results[:5]
-    ])
-    
-    prompt = f"""你是一个创意评估专家。用户有一个灵感，并搜索到了相关资料。请基于这些资料，生成一份简洁的评估报告。
-
-用户灵感：{idea}
-
-搜索到的相关资料：
-{search_text}
-
-请生成 JSON 格式的报告（只输出 JSON，不要其他内容）：
-{{
-    "summary": "一句话总结这个灵感的价值或现状（30字内）",
-    "competitors": "列出现有的相关产品或竞品（50字内）",
-    "feasibility": "实现可行性和建议（50字内）",
-    "risk": "潜在风险或注意事项（50字内）",
-    "next_steps": "给用户的下一步行动建议（30字内）"
-}}
-"""
-    try:
-        response = pensieve.llm_chat(prompt)
-        print(f"[调试] GLM返回原始内容: {response[:200]}...")
-        
-        # 提取 Markdown 代码块内的 JSON
-        code_match = re.search(r'```json\s*(\{.*?\})\s*```', response, re.S)
-        if code_match:
-            json_str = code_match.group(1)
-        else:
-            # 直接匹配第一个 JSON 对象
-            json_match = re.search(r'\{.*\}', response, re.S)
-            if json_match:
-                json_str = json_match.group(0)
-            else:
-                print(f"[报告生成错误] 未找到JSON: {response[:200]}")
-                raise ValueError("LLM返回未包含JSON")
-        
-        print(f"[调试] 提取的JSON字符串: {json_str[:200]}...")
-        report = json.loads(json_str)
-        
-        # 确保必填字段存在
-        required = ['summary', 'competitors', 'feasibility', 'risk', 'next_steps']
-        for key in required:
-            if key not in report:
-                report[key] = '（未提供）'
-        return report
-        
-    except Exception as e:
-        print(f"[报告生成错误] {e}")
-        import traceback
-        traceback.print_exc()
-        return {
-            'summary': f'发现 {len(search_results)} 条相关信息，建议进一步分析。',
-            'competitors': '、'.join([r.get('title', '')[:20] for r in search_results[:3]]) or '未发现直接竞品',
-            'feasibility': '建议参考以上信息评估技术可行性',
-            'risk': '需关注已有产品的市场占有情况',
-            'next_steps': '深入调研竞品用户评价'
-        }
-@app.route('/api/idea/evaluate', methods=['POST'])
-@login_required
-def evaluate_idea():
-    """灵感联网评估"""
-    data = request.json or {}
-    idea = data.get('idea', '').strip()
-    if not idea:
-        return jsonify({'error': '灵感内容不能为空'}), 400
-    
-    keywords = idea[:30]
-    api_key = os.environ.get('OPENAI_API_KEY')
-    if not api_key:
-        return jsonify({
-            'idea': idea,
-            'error': '未配置 API Key，请设置 OPENAI_API_KEY 环境变量'
-        }), 503
-    
-    search_results = search_zhipu_web(keywords, api_key)
-    report = generate_report_with_glm(idea, search_results, api_key)
-    
-    return jsonify({
-        'idea': idea,
-        'keywords': keywords,
-        'search_results': search_results,
-        'report': report,
-        'status': 'success'
-    })
+    cur = db.execute('DELETE FROM records WHERE id = ? AND user_id = ?',
+                     (rid, session['uid']))
+    if cur.rowcount:
+        db.execute('DELETE FROM records_fts WHERE rowid = ?', (rid,))
+        db.commit()
+    return jsonify({'ok': bool(cur.rowcount)})
 
 
 if __name__ == '__main__':
@@ -449,4 +221,3 @@ if __name__ == '__main__':
     print('  按 Ctrl+C 停止')
     print('=' * 48)
     app.run(host='127.0.0.1', port=5000, debug=False)
-00, debug=False)

@@ -22,8 +22,8 @@ import json
 import os
 import secrets
 from pathlib import Path
+from flask import Flask, g, jsonify, request, send_file, session, render_template
 
-from flask import Flask, g, jsonify, request, send_file, session
 
 try:
     import pensieve            # 核心文件叫 pensieve.py 时
@@ -196,24 +196,36 @@ def memories():
     rows = get_db().execute(
         'SELECT * FROM records WHERE user_id = ? ORDER BY id DESC LIMIT 50',
         (session['uid'],)).fetchall()
-    return jsonify([{
-        'id': r['id'], 'content': r['content'],
-        'created_at': r['created_at'], 'event_date': r['event_date'],
-        'tags': json.loads(r['tags']),
-    } for r in rows])
+    
+    # 调试：打印出字段名，确认 category 是否存在
+    if rows:
+        print("DEBUG: 字段列表:", rows[0].keys())
+    
+    result = []
+    for r in rows:
+        # 确保 category 字段存在，如果不存在则设为 "未分类"
+        cat = r['category'] if 'category' in r.keys() and r['category'] else '未分类'
+        result.append({
+            'id': r['id'],
+            'content': r['content'],
+            'created_at': r['created_at'],
+            'event_date': r['event_date'],
+            'tags': json.loads(r['tags']),
+            'category': cat,   # 关键：加上这一行
+        })
+    return jsonify(result)
 
 
 @app.route('/api/memories/<int:rid>', methods=['DELETE'])
 @login_required
 def delete_memory(rid):
-    """删除自己的一条记忆（删别人会返回 ok=false）。"""
     db = get_db()
-    cur = db.execute('DELETE FROM records WHERE id = ? AND user_id = ?',
-                     (rid, session['uid']))
-    if cur.rowcount:
-        db.execute('DELETE FROM records_fts WHERE rowid = ?', (rid,))
-        db.commit()
-    return jsonify({'ok': bool(cur.rowcount)})
+    cur = db.execute('DELETE FROM records WHERE id = ? AND user_id = ?', (rid, session['uid']))
+    db.commit()
+    if cur.rowcount > 0:
+        return jsonify({'success': True, 'message': '已删除'})
+    else:
+        return jsonify({'success': False, 'error': '记忆不存在或无权限'}), 404
 
 
 # ============================================================
@@ -437,3 +449,4 @@ if __name__ == '__main__':
     print('  按 Ctrl+C 停止')
     print('=' * 48)
     app.run(host='127.0.0.1', port=5000, debug=False)
+

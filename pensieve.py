@@ -630,3 +630,110 @@ def delete_memory_by_id(db, memory_id, uid):
 
 if __name__ == '__main__':
     main()
+
+# ============================================================
+# 以下是新增的智能分类模块（智谱 API 接入）
+# ============================================================
+
+# ----- 配置区（在这里填你的 API Key）-----
+ZHIPU_API_KEY = "你的智谱API Key"   # 替换成你的真实 Key
+ZHIPU_MODEL = "glm-4-plus"          # 可选：glm-4-flash, glm-4-plus, glm-4-air
+# ---------------------------------------
+
+# 读取分类 Prompt 模板
+def load_classify_prompt():
+    import os
+    prompt_path = os.path.join(os.path.dirname(__file__), 'classify_prompt_v1.txt')
+    with open(prompt_path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+PROMPT_TEMPLATE = load_classify_prompt()
+
+# 初始化智谱客户端
+zhipu_client = ZhipuAI(api_key=ZHIPU_API_KEY)
+
+
+def classify_memory(text):
+    """
+    对用户输入进行分类，返回分类结果字典
+    优先调用 LLM，失败则降级到规则打标
+    """
+    # 1. 先尝试 LLM
+    try:
+        result = _classify_by_llm(text)
+        if result and _validate_result(result):
+            return result
+    except Exception as e:
+        print(f"⚠️ LLM分类失败，降级到规则打标: {e}")
+    
+    # 2. 降级到规则打标
+    return _classify_by_rule(text)
+
+
+def _classify_by_llm(text):
+    """调用智谱大模型进行分类"""
+    full_prompt = PROMPT_TEMPLATE.replace("{{user_input}}", text)
+    
+    response = zhipu_client.chat.completions.create(
+        model=ZHIPU_MODEL,
+        messages=[
+            {"role": "user", "content": full_prompt}
+        ],
+        temperature=0.1,
+        timeout=10
+    )
+    
+    raw = response.choices[0].message.content
+    
+    # 提取 JSON
+    json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+    if json_match:
+        return json.loads(json_match.group())
+    return None
+
+
+def _validate_result(result):
+    """校验 LLM 返回的结果是否合法"""
+    required = ['category', 'summary', 'tags']
+    if not result:
+        return False
+    for key in required:
+        if key not in result:
+            return False
+    if result['category'] not in ['任务', '灵感', '感悟']:
+        return False
+    return True
+
+
+def _classify_by_rule(text):
+    """规则打标降级（当 LLM 不可用时使用）"""
+    TASK_KEYWORDS = ['明天', '下周', '下周一', '今晚', '明早', '提醒我', '必须', '截止', '提交', '面试', '开会', '抢票', '打卡']
+    INSPIRE_KEYWORDS = ['想做', '想搞', '设计', '开发', '做一个', '搞一个', '接入', '平台', 'App', '工具', '产品', '系统', '自动化', '智能']
+    FEEL_KEYWORDS = ['觉得', '意识到', '发现', '原来', '羡慕', '焦虑', '害怕', '拖延', '反思', '感悟', '独处', '讨好', '愤怒', '委屈', '迷茫']
+    
+    score_task = sum(1 for kw in TASK_KEYWORDS if kw in text)
+    score_inspire = sum(1 for kw in INSPIRE_KEYWORDS if kw in text)
+    score_feel = sum(1 for kw in FEEL_KEYWORDS if kw in text)
+    
+    if score_task >= score_inspire and score_task >= score_feel and score_task > 0:
+        category = "任务"
+    elif score_inspire >= score_feel and score_inspire > 0:
+        category = "灵感"
+    else:
+        category = "感悟"
+    
+    summary = text[:10] if len(text) > 10 else text
+    
+    tags = []
+    for kw in TASK_KEYWORDS + INSPIRE_KEYWORDS + FEEL_KEYWORDS:
+        if kw in text and len(tags) < 3:
+            tags.append(kw)
+    if not tags:
+        tags = ["未分类"]
+    
+    return {
+        "category": category,
+        "summary": summary,
+        "tags": tags[:3],
+        "datetime": None
+    }

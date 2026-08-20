@@ -272,6 +272,7 @@ CREATE TABLE IF NOT EXISTS records (
     event_date  TEXT,                        -- YYYY-MM-DD 或 NULL
     source      TEXT DEFAULT 'text',
     created_at  TEXT NOT NULL
+    category    TEXT DEFAULT ''
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS records_fts USING fts5(tokens);
 """
@@ -285,12 +286,23 @@ def get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
-    # —— 旧版（v1，无 user_id 列）数据库自动迁移 ——
+    
+    # —— 自动迁移：检查并补全缺失的列 ——
     cols = [r[1] for r in conn.execute('PRAGMA table_info(records)')]
-    if cols and 'user_id' not in cols:
+    
+    # 旧版迁移：user_id
+    if 'user_id' not in cols:
         conn.execute('ALTER TABLE records ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0')
         conn.commit()
-    conn.execute(INDEX_SQL)   # 索引依赖 user_id 列，必须在迁移之后创建
+        cols.append('user_id')  # 更新列名列表
+    
+    # 新增迁移：category（任务/灵感/感悟）
+    if 'category' not in cols:
+        conn.execute('ALTER TABLE records ADD COLUMN category TEXT DEFAULT ""')
+        conn.commit()
+        print('✅ 已自动添加 category 列')
+    
+    conn.execute(INDEX_SQL)
     conn.commit()
     return conn
 

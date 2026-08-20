@@ -352,21 +352,30 @@ def add_record(conn: sqlite3.Connection, content: str, source: str = 'text',
     if not content:
         print('⚠️  内容为空，未存入。')
         return None
+    
+    # --- 1. 原有打标（摘要/标签/人物/日期） ---
     meta, engine = (llm_extract(content), 'LLM') if llm_available() else (None, '')
     if meta is None:                      # 无 Key 或 LLM 故障 → 规则兜底
         meta, engine = rule_extract(content), '规则'
+    
+    # --- 2. 【新增】三级分类（任务/灵感/感悟）--- 
+    category = classify_triple(content)   # 调用你刚加的分类函数
+    
+    # --- 3. 写入数据库（新增 category 字段） ---
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     cur = conn.execute(
-        'INSERT INTO records(user_id, content, summary, tags, people, event_date, source, created_at)'
-        ' VALUES (?,?,?,?,?,?,?,?)',
+        # ⚠️  INSERT 语句增加了 category 字段（第9个）
+        'INSERT INTO records(user_id, content, summary, tags, people, event_date, source, created_at, category)'
+        ' VALUES (?,?,?,?,?,?,?,?,?)',
         (user_id, content, meta['summary'], json.dumps(meta['tags'], ensure_ascii=False),
-         json.dumps(meta['people'], ensure_ascii=False), meta['event_date'], source, now))
+         json.dumps(meta['people'], ensure_ascii=False), meta['event_date'], source, now, category))
     rid = cur.lastrowid
     conn.execute('INSERT INTO records_fts(rowid, tokens) VALUES (?,?)',
                  (rid, ' '.join(tokenize(content))))
     conn.commit()
+    
     if verbose:
-        print(f'✅ 已存入记忆 #{rid}（用户 #{user_id}，打标引擎：{engine}）')
+        print(f'✅ 已存入记忆 #{rid}（用户 #{user_id}，打标引擎：{engine}，分类：{category}）')
         print(f'   摘要：{meta["summary"]}')
         print(f'   标签：{"、".join(meta["tags"]) or "无"}　'
               f'日期：{meta["event_date"] or "无"}　'

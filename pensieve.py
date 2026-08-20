@@ -35,6 +35,7 @@ import sqlite3
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from zhipuai import ZhipuAI
 
 VERSION = '2.0.0'
 

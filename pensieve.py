@@ -264,14 +264,14 @@ CREATE TABLE IF NOT EXISTS users (
 );
 CREATE TABLE IF NOT EXISTS records (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     INTEGER NOT NULL DEFAULT 0,  -- 归属用户；0 = 待认领的旧版数据
-    content     TEXT NOT NULL,               -- 原文，写入后不可变
+    user_id     INTEGER NOT NULL DEFAULT 0,   
+    content     TEXT NOT NULL,               
     summary     TEXT DEFAULT '',
-    tags        TEXT DEFAULT '[]',           -- JSON 数组
-    people      TEXT DEFAULT '[]',           -- JSON 数组
-    event_date  TEXT,                        -- YYYY-MM-DD 或 NULL
+    tags        TEXT DEFAULT '[]',          
+    people      TEXT DEFAULT '[]',           
+    event_date  TEXT,                        
     source      TEXT DEFAULT 'text',
-    created_at  TEXT NOT NULL
+    created_at  TEXT NOT NULL,
     category    TEXT DEFAULT ''
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS records_fts USING fts5(tokens);
@@ -688,3 +688,4 @@ def classify_triple(text: str) -> str:
 
 if __name__ == '__main__':
     main()
+

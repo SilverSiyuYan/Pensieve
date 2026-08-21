@@ -25,6 +25,7 @@ def mock_client(response_content: str) -> tuple[SimpleNamespace, MockCompletions
 
 
 def test_generate_integrated_answer_builds_required_prompts(monkeypatch) -> None:
+    monkeypatch.setenv("MODEL_NAME", "qwen-plus")
     client, completions = mock_client("周四记得洗头。\n【原始记录】[2026-08-21] 周四洗头")
     monkeypatch.setattr(llm_service, "_client", client)
 
@@ -81,6 +82,7 @@ def test_classify_intent_parses_query_json(monkeypatch) -> None:
 
 def test_dotenv_configuration_matches_client_settings(monkeypatch) -> None:
     """The local dotenv configuration feeds the same values used by OpenAI SDK."""
+    monkeypatch.setenv("MODEL_NAME", "qwen-plus")
     monkeypatch.setattr(llm_service, "_client", None)
 
     client = llm_service._get_client()

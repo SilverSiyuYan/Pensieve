@@ -1,0 +1,48 @@
+# Secrets and local configuration
+.env
+backend/.env
+!.env.example
+!backend/.env.example
+
+# Runtime data
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-shm
+*.db-wal
+backend/chroma_data/
+chroma_data/
+data/
+
+# Logs
+*.log
+logs/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Temporary and compiled files
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*.pid
+tmp/
+temp/
+dist/
+build/
+*.egg-info/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

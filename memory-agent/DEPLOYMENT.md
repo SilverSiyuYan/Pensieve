@@ -1,6 +1,6 @@
 # 服务器部署交接说明
 
-本文是服务器部署人员的主交接文档。项目当前支持单实例部署；由于应用尚无登录、API 鉴权和多用户数据隔离，只能部署在可信内网，或置于具备认证和访问控制的外部网关之后。
+本文是服务器部署人员的主交接文档。项目提供账户和用户级记忆隔离，但当前 SQLite/本地 ChromaDB 架构仍只支持单后端实例。公网入口必须配置 HTTPS 和限流。
 
 ## 1. 环境要求
 
@@ -50,6 +50,8 @@ docker compose down
 | `OPENAI_API_KEY` | 是 | OpenAI 兼容服务密钥，禁止提交到 Git、镜像或工单 |
 | `OPENAI_BASE_URL` | 是 | Chat Completions 兼容 API 根地址 |
 | `MODEL_NAME` | 是 | 服务商提供的模型名称 |
+| `SESSION_TTL_HOURS` | 是 | Bearer Session 有效小时数，默认 24 |
+| `CORS_ALLOWED_ORIGINS` | 是 | 允许的前端源，多个值用英文逗号分隔 |
 
 Compose 从 `backend/.env` 注入变量。模板中的值不是生产密钥。建议由服务器 Secret 管理系统生成该文件，并限制为部署用户可读。
 
@@ -62,12 +64,14 @@ Compose 从 `backend/.env` 注入变量。模板中的值不是生产密钥。�
 
 Compose 使用 `memory_data` 命名卷挂载 `/data`。SQLite 应作为首要备份对象；ChromaDB 可以从 SQLite 重新生成。当前架构只允许一个后端实例和一个 Uvicorn worker，不要直接横向扩容。
 
-应用启动时会自动创建空表。生产环境不要执行 `backend/init_db.py`，该脚本会插入演示数据。
+应用启动时会自动创建或迁移表。`backend/init_db.py` 现在只初始化结构，不插入演示数据，也可以在启动前显式执行。
+
+旧单用户数据库首次迁移时，原有记忆会归属到禁用的 legacy 用户，不会自动暴露给任何新注册账户。迁移前必须备份；如需把旧数据转交给指定账户，应另行执行经审核的数据归属迁移。
 
 需要重建索引时，在禁止普通用户访问且暂停写入后执行：
 
 ```bash
-curl --fail -X POST http://127.0.0.1:8080/api/memory/rebuild
+curl --fail -X POST -H "Authorization: Bearer $ACCESS_TOKEN" http://127.0.0.1:8080/api/memory/rebuild
 ```
 
 ## 5. 数据备份方法
@@ -136,11 +140,10 @@ ChromaDB 默认嵌入模型可能尚未下载。检查容器网络、磁盘空�
 
 ## 上线限制
 
-- 当前没有认证、授权、多用户隔离、API 限流和管理员角色。
-- `/api/memory/rebuild` 必须由外层网关限制。
-- CORS 当前允许所有来源；在可信内网以外部署前必须收紧。
+- 当前已提供账户认证和用户级记忆隔离，但没有管理员角色和 API 限流。
+- `/api/memory/rebuild` 需要认证并只处理当前用户，仍建议限制调用频率。
+- 必须把 `CORS_ALLOWED_ORIGINS` 设置为实际 HTTPS 前端域名。
 - 应由外部网关配置 TLS、认证、请求体限制、速率限制和访问日志。
 - 部署前必须轮换曾进入 Git 历史的 API Key，并由仓库负责人清理历史。
 
 上线前逐项执行 [部署检查清单](docs/DEPLOYMENT_CHECKLIST.md)。
-

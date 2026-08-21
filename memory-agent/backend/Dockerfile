@@ -10,7 +10,7 @@ COPY requirements.txt ./
 RUN python -m pip install --upgrade pip && \
     pip install -r requirements.txt
 
-COPY main.py database.py vector_store.py llm_service.py ./
+COPY main.py auth.py database.py vector_store.py llm_service.py ./
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # Keep mutable state outside the application code. The existing application

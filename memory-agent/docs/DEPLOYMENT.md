@@ -29,6 +29,8 @@
 | `OPENAI_API_KEY` | 是 | `由密钥系统注入` | OpenAI 兼容模型服务密钥，禁止提交 Git |
 | `OPENAI_BASE_URL` | 是 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | OpenAI 兼容 API 根地址 |
 | `MODEL_NAME` | 是 | `qwen-plus` | Chat Completions 模型名称 |
+| `SESSION_TTL_HOURS` | 是 | `24` | 登录 Session 有效小时数 |
+| `CORS_ALLOWED_ORIGINS` | 是 | `https://memory.example.com` | 允许的前端源；多个值用英文逗号分隔 |
 
 当前版本的数据库和 Chroma 路径由代码固定。容器镜像通过符号链接把它们统一存放到 `/data`，Compose 再把 `/data` 挂载为持久卷。
 
@@ -69,14 +71,14 @@ docker compose down
 
 ## 4. 数据初始化
 
-FastAPI 启动时会自动创建空的 `memories` 表，因此生产环境不需要执行测试数据脚本。
+FastAPI 启动时会自动创建或迁移用户、Session、对话、消息、记忆、embedding 和任务表。`backend/init_db.py` 只初始化结构，不写入演示数据。
 
-`backend/init_db.py` 会写入三条示例记忆，只用于本地演示。生产环境不要运行该脚本。
+旧单用户记忆会迁移到禁用的 legacy 用户，不会被新账户看到。迁移前必须完成备份。
 
-如果 SQLite 中已有数据但向量索引丢失，可在确认只有管理员能够访问服务后执行：
+如果当前登录用户的 SQLite 数据存在但向量索引丢失，可携带该用户 Bearer Token 执行：
 
 ```bash
-curl --fail -X POST http://127.0.0.1:8080/api/memory/rebuild
+curl --fail -X POST -H "Authorization: Bearer $ACCESS_TOKEN" http://127.0.0.1:8080/api/memory/rebuild
 ```
 
 重建期间不要并发写入，并在完成后抽样验证检索结果。
@@ -117,8 +119,7 @@ docker compose up -d
 
 - 推荐由现有网关或负载均衡器终止 TLS，再转发到本机 `8080`。
 - Compose 不对宿主机公开后端端口；Nginx 是唯一入口。
-- 当前应用没有登录、多用户隔离和管理权限。只能部署在可信网络，或由外部认证代理保护。
-- 限制 `/api/memory/rebuild`，必要时在外层网关直接阻止公网访问。
+- 当前应用有账户认证和用户级数据隔离，但登录/注册仍需由网关限流。
+- `/api/memory/rebuild` 只重建当前用户索引，仍应限制调用频率。
 - 不要在日志、工单或聊天中粘贴 `.env` 内容。
 - API Key 轮换后重新创建后端容器：`docker compose up -d --force-recreate backend`。
-

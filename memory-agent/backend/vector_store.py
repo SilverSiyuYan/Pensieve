@@ -24,30 +24,31 @@ def _get_collection() -> chromadb.Collection:
     return client.get_or_create_collection(name=COLLECTION_NAME)
 
 
-def _vector_id(memory_id: int) -> str:
-    return str(memory_id)
+def _vector_id(user_id: str, memory_id: int) -> str:
+    return f"{user_id}:{memory_id}"
 
 
-def _normalise_metadata(memory_id: int, metadata: dict[str, Any]) -> dict[str, Any]:
+def _normalise_metadata(user_id: str, memory_id: int, metadata: dict[str, Any]) -> dict[str, Any]:
     """Ensure metadata conforms to ChromaDB's scalar-value constraints."""
     return {
         "memory_id": memory_id,
+        "user_id": user_id,
         "tags": metadata.get("tags") or "",
         "category": metadata.get("category") or "",
         "created_at": metadata.get("created_at") or "",
     }
 
 
-def add_to_vector(memory_id: int, content: str, metadata: dict[str, Any]) -> None:
+def add_to_vector(user_id: str, memory_id: int, content: str, metadata: dict[str, Any]) -> None:
     """Embed and persist a memory's original text in the ``memories`` collection."""
     _get_collection().upsert(
-        ids=[_vector_id(memory_id)],
+        ids=[_vector_id(user_id, memory_id)],
         documents=[content],
-        metadatas=[_normalise_metadata(memory_id, metadata)],
+        metadatas=[_normalise_metadata(user_id, memory_id, metadata)],
     )
 
 
-def search_similar(query: str, top_k: int = 5) -> list[dict[str, Any]]:
+def search_similar(user_id: str, query: str, top_k: int = 5) -> list[dict[str, Any]]:
     """Return the closest semantic memories, ordered by ChromaDB distance."""
     if top_k <= 0:
         raise ValueError("top_k must be greater than zero")
@@ -59,6 +60,7 @@ def search_similar(query: str, top_k: int = 5) -> list[dict[str, Any]]:
     result = collection.query(
         query_texts=[query],
         n_results=min(top_k, collection.count()),
+        where={"user_id": user_id},
         include=["documents", "metadatas", "distances"],
     )
     documents = result["documents"][0]
@@ -76,29 +78,24 @@ def search_similar(query: str, top_k: int = 5) -> list[dict[str, Any]]:
     ]
 
 
-def delete_from_vector(memory_id: int) -> None:
+def delete_from_vector(user_id: str, memory_id: int) -> None:
     """Remove the vector associated with a SQLite memory ID."""
-    _get_collection().delete(ids=[_vector_id(memory_id)])
+    _get_collection().delete(ids=[_vector_id(user_id, memory_id)], where={"user_id": user_id})
 
 
-def rebuild_vector_store() -> int:
-    """Recreate the vector collection from every memory stored in SQLite.
+def rebuild_vector_store(user_id: str) -> int:
+    """Recreate one user's vectors from their SQLite memories.
 
     Returns the number of SQLite memories indexed.
     """
-    client = chromadb.PersistentClient(path=CHROMA_PATH)
-    try:
-        client.delete_collection(COLLECTION_NAME)
-    except ValueError:
-        # The first rebuild has no existing collection to delete.
-        pass
-    collection = client.get_or_create_collection(name=COLLECTION_NAME)
+    collection = _get_collection()
+    collection.delete(where={"user_id": user_id})
 
-    memories = list_memories(limit=100_000, offset=0)
+    memories = list_memories(user_id, limit=100_000, offset=0)
     if memories:
         collection.upsert(
-            ids=[_vector_id(memory["id"]) for memory in memories],
+            ids=[_vector_id(user_id, memory["id"]) for memory in memories],
             documents=[memory["content"] for memory in memories],
-            metadatas=[_normalise_metadata(memory["id"], memory) for memory in memories],
+            metadatas=[_normalise_metadata(user_id, memory["id"], memory) for memory in memories],
         )
     return len(memories)

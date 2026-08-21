@@ -33,9 +33,6 @@ def _get_client() -> OpenAI:
     if _client is None:
         api_key = os.environ["OPENAI_API_KEY"]
         base_url = os.environ["OPENAI_BASE_URL"]
-        masked_key = f"{api_key[:7]}...{api_key[-4:]}" if len(api_key) > 11 else "***"
-        print("调试：当前读取到的 API Key 是:", masked_key)
-        print("调试：当前读取到的 Base URL 是:", base_url)
         _client = OpenAI(
             api_key=api_key,
             base_url=base_url,

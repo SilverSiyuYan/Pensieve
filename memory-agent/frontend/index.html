@@ -17,6 +17,10 @@
       button { border:0; border-radius:10px; cursor:pointer; font:inherit; transition:background .2s,transform .2s,opacity .2s; }
       button:hover { transform:translateY(-1px); }
       .theme-toggle { background:var(--surface); color:var(--text); border:1px solid var(--border); padding:9px 12px; }
+      .top-actions { display:flex; align-items:center; gap:10px; } .account-name { color:var(--muted); font-size:.85rem; }
+      .auth-panel { max-width:420px; margin:10vh auto; padding:24px; } .auth-panel h2 { margin:0 0 8px; }
+      .auth-form { display:grid; gap:12px; margin-top:18px; } .auth-form input { padding:12px; color:var(--text); background:var(--surface-muted); border:1px solid var(--border); border-radius:11px; font:inherit; }
+      .auth-actions { display:flex; gap:10px; } .auth-actions button { flex:1; padding:11px; color:var(--primary-text); background:var(--primary); }
       .layout { display:grid; grid-template-columns:minmax(0,1.65fr) minmax(300px,.9fr); gap:20px; align-items:stretch; }
       .panel { background:var(--surface); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); }
       .chat-panel { display:flex; flex-direction:column; min-height:calc(100vh - 145px); }
@@ -57,9 +61,18 @@
     <main class="app-shell">
       <header class="topbar">
         <div><h1>智能记忆助手</h1><p class="subtitle">记录、检索并整理属于你的长期记忆</p></div>
-        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换深浅色模式">🌙 深色</button>
+        <div class="top-actions"><span id="account-name" class="account-name"></span><button id="logout-button" class="theme-toggle" type="button" hidden>退出</button><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换深浅色模式">🌙 深色</button></div>
       </header>
-      <section class="layout">
+      <section id="auth-panel" class="panel auth-panel">
+        <h2>登录记忆账户</h2><p class="subtitle">登录后，每个账户拥有独立的长期记忆。</p>
+        <p id="auth-error" class="error" hidden></p>
+        <form id="auth-form" class="auth-form">
+          <input id="auth-email" type="email" autocomplete="email" placeholder="邮箱" required />
+          <input id="auth-password" type="password" autocomplete="current-password" minlength="10" maxlength="128" placeholder="密码（至少 10 位）" required />
+          <div class="auth-actions"><button id="login-button" type="submit">登录</button><button id="register-button" type="button">注册</button></div>
+        </form>
+      </section>
+      <section id="app-layout" class="layout" hidden>
         <section class="panel chat-panel" aria-label="对话区域">
           <div id="chat-history" class="chat-history"><p class="empty-chat">你好！告诉我需要记住的事，或问问过去记录了什么。</p></div>
           <p id="chat-error" class="error" hidden></p>
@@ -79,6 +92,17 @@
       const configuredBase = new URLSearchParams(window.location.search).get('apiBase') || localStorage.getItem('memory-agent-api-base');
       const currentOrigin = window.location.protocol.startsWith('http') ? window.location.origin : 'http://localhost:8001';
       const API_BASE_URL = (configuredBase || currentOrigin).replace(/\/$/, '');
+      let accessToken = localStorage.getItem('memory-agent-access-token') || '';
+      let currentConversationId = null;
+      const authPanel = document.querySelector('#auth-panel');
+      const appLayout = document.querySelector('#app-layout');
+      const authForm = document.querySelector('#auth-form');
+      const authEmail = document.querySelector('#auth-email');
+      const authPassword = document.querySelector('#auth-password');
+      const authError = document.querySelector('#auth-error');
+      const registerButton = document.querySelector('#register-button');
+      const logoutButton = document.querySelector('#logout-button');
+      const accountName = document.querySelector('#account-name');
       const chatHistory = document.querySelector('#chat-history');
       const chatForm = document.querySelector('#chat-form');
       const userInput = document.querySelector('#user-input');
@@ -91,10 +115,34 @@
       function showError(message) { chatError.textContent = message; chatError.hidden = false; }
       function clearError() { chatError.hidden = true; chatError.textContent = ''; }
       async function request(path, options = {}) {
+        const headers = new Headers(options.headers || {});
+        if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+        options.headers = headers;
         const response = await fetch(`${API_BASE_URL}${path}`, options);
         let data; try { data = await response.json(); } catch { data = {}; }
+        if (response.status === 401 && !path.startsWith('/api/auth/')) showAuth();
         if (!response.ok) throw new Error(data.detail || '请求失败，请稍后重试。');
         return data;
+      }
+      function showAuth(message = '') {
+        accessToken = ''; currentConversationId = null; localStorage.removeItem('memory-agent-access-token');
+        authPanel.hidden = false; appLayout.hidden = true; logoutButton.hidden = true; accountName.textContent = '';
+        authError.textContent = message; authError.hidden = !message;
+      }
+      function showApp(user) {
+        authPanel.hidden = true; appLayout.hidden = false; logoutButton.hidden = false; accountName.textContent = user.email;
+        loadMemories(); userInput.focus();
+      }
+      async function authenticate(mode) {
+        authError.hidden = true;
+        try {
+          const result = await request(`/api/auth/${mode}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: authEmail.value.trim(), password: authPassword.value }),
+          });
+          accessToken = result.access_token; localStorage.setItem('memory-agent-access-token', accessToken);
+          authPassword.value = ''; showApp(result.user);
+        } catch (error) { authError.textContent = error.message; authError.hidden = false; }
       }
       function addMessage(role, text, sourceMemories = []) {
         chatHistory.querySelector('.empty-chat')?.remove();
@@ -159,8 +207,9 @@
         sendButton.disabled = true; sendButton.textContent = '思考中…';
         try {
           const result = await request('/api/memory/auto', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input }),
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input, conversation_id: currentConversationId }),
           });
+          currentConversationId = result.conversation_id || currentConversationId;
           if (result.success && result.memory_id) {
             addMessage('assistant', `已记住：${input}`); await loadMemories();
           } else {
@@ -177,8 +226,11 @@
         themeToggle.textContent = theme === 'dark' ? '☀️ 浅色' : '🌙 深色';
       }
       themeToggle.addEventListener('click', () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
+      authForm.addEventListener('submit', (event) => { event.preventDefault(); authenticate('login'); });
+      registerButton.addEventListener('click', () => authenticate('register'));
+      logoutButton.addEventListener('click', async () => { try { await request('/api/auth/logout', { method: 'POST' }); } finally { showAuth(); } });
       setTheme(localStorage.getItem('memory-agent-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
-      loadMemories();
+      if (accessToken) request('/api/auth/me').then(showApp).catch(() => showAuth('登录已过期，请重新登录。')); else showAuth();
     </script>
   </body>
 </html>

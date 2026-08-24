@@ -43,18 +43,22 @@
       .memory-panel { padding:18px; min-height:0; }
       .panel-heading { display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; }
       .panel-heading h2 { margin:0; font-size:1.05rem; } .memory-count { color:var(--muted); font-size:.85rem; }
+      .memory-controls { display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-bottom:13px; }
+      .memory-control { display:grid; gap:5px; color:var(--muted); font-size:.76rem; }
+      .memory-control select { width:100%; padding:8px 9px; color:var(--text); background:var(--surface-muted); border:1px solid var(--border); border-radius:9px; font:inherit; }
       .memory-list { display:flex; flex-direction:column; gap:11px; max-height:calc(100vh - 190px); overflow-y:auto; }
       .memory-card { padding:14px; background:var(--surface-muted); border:1px solid var(--border); border-radius:12px; }
       .memory-content { margin:0 0 10px; line-height:1.45; font-weight:600; }
       .memory-meta { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
       .memory-tags { display:flex; flex-wrap:wrap; gap:5px; }
       .tag { padding:3px 7px; border-radius:20px; color:var(--primary); background:color-mix(in srgb,var(--primary) 12%,transparent); font-size:.75rem; }
+      .category-badge { padding:3px 7px; border-radius:20px; color:var(--primary-text); background:var(--primary); font-size:.75rem; white-space:nowrap; }
       .memory-time { display:block; margin-top:10px; color:var(--muted); font-size:.78rem; }
       .delete { padding:4px 7px; color:var(--danger); background:transparent; font-size:.82rem; }
       .delete:hover { background:color-mix(in srgb,var(--danger) 12%,transparent); }
       .empty-list { color:var(--muted); text-align:center; padding:26px 10px; } .error { color:var(--danger); font-size:.9rem; margin:0 16px 12px; }
       @media (max-width:820px) { .app-shell { padding:12px; } .layout { grid-template-columns:1fr; } .chat-panel { min-height:62vh; } .memory-list { max-height:44vh; } }
-      @media (max-width:480px) { .topbar { align-items:flex-start; } .subtitle { display:none; } .chat-history { padding:15px; } .message { max-width:96%; } .composer { padding:12px; } .send { padding:12px; } }
+      @media (max-width:480px) { .topbar { align-items:flex-start; } .subtitle { display:none; } .chat-history { padding:15px; } .message { max-width:96%; } .composer { padding:12px; } .send { padding:12px; } .memory-controls { grid-template-columns:1fr; } }
     </style>
   </head>
   <body>
@@ -83,6 +87,18 @@
         </section>
         <aside class="panel memory-panel" aria-label="记忆列表">
           <div class="panel-heading"><h2>已存储的记忆</h2><span id="memory-count" class="memory-count">0 条</span></div>
+          <div class="memory-controls">
+            <label class="memory-control">分类
+              <select id="memory-category" aria-label="按分类筛选记忆">
+                <option value="">全部</option><option value="inspiration">灵感</option><option value="todo">待办</option><option value="knowledge">知识点</option><option value="note">便签</option>
+              </select>
+            </label>
+            <label class="memory-control">创建时间
+              <select id="memory-sort-order" aria-label="按创建时间排序">
+                <option value="desc">从近到远</option><option value="asc">从远到近</option>
+              </select>
+            </label>
+          </div>
           <div id="memory-list" class="memory-list"></div>
         </aside>
       </section>
@@ -94,6 +110,7 @@
       const API_BASE_URL = (configuredBase || currentOrigin).replace(/\/$/, '');
       let accessToken = localStorage.getItem('memory-agent-access-token') || '';
       let currentConversationId = null;
+      let memoryRequestId = 0;
       const authPanel = document.querySelector('#auth-panel');
       const appLayout = document.querySelector('#app-layout');
       const authForm = document.querySelector('#auth-form');
@@ -110,6 +127,8 @@
       const chatError = document.querySelector('#chat-error');
       const memoryList = document.querySelector('#memory-list');
       const memoryCount = document.querySelector('#memory-count');
+      const memoryCategory = document.querySelector('#memory-category');
+      const memorySortOrder = document.querySelector('#memory-sort-order');
       const themeToggle = document.querySelector('#theme-toggle');
       const scrollChatToBottom = () => { chatHistory.scrollTop = chatHistory.scrollHeight; };
       function showError(message) { chatError.textContent = message; chatError.hidden = false; }
@@ -118,7 +137,9 @@
         const headers = new Headers(options.headers || {});
         if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
         options.headers = headers;
-        const response = await fetch(`${API_BASE_URL}${path}`, options);
+        let response;
+        try { response = await fetch(`${API_BASE_URL}${path}`, options); }
+        catch { throw new Error(`无法连接后端服务（${API_BASE_URL}），请确认服务已启动且 API 地址正确。`); }
         let data; try { data = await response.json(); } catch { data = {}; }
         if (response.status === 401 && !path.startsWith('/api/auth/')) showAuth();
         if (!response.ok) throw new Error(data.detail || '请求失败，请稍后重试。');
@@ -173,7 +194,7 @@
         memoryList.replaceChildren(); memoryCount.textContent = `${memories.length} 条`;
         if (!memories.length) {
           const empty = document.createElement('p');
-          empty.className = 'empty-list'; empty.textContent = '还没有记忆，开始聊聊吧。';
+          empty.className = 'empty-list'; empty.textContent = memoryCategory.value ? '当前分类下还没有记忆。' : '还没有记忆，开始聊聊吧。';
           memoryList.append(empty); return;
         }
         memories.forEach((memory) => {
@@ -181,6 +202,9 @@
           const content = document.createElement('p'); content.className = 'memory-content'; content.textContent = memory.content;
           const meta = document.createElement('div'); meta.className = 'memory-meta';
           const tags = document.createElement('div'); tags.className = 'memory-tags';
+          const categoryLabels = { inspiration: '灵感', todo: '待办', knowledge: '知识点', note: '便签' };
+          const category = document.createElement('span'); category.className = 'category-badge'; category.textContent = categoryLabels[memory.category] || '便签';
+          tags.append(category);
           (memory.tags || '').split(',').filter(Boolean).forEach((tagName) => {
             const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = tagName.trim(); tags.append(tag);
           });
@@ -197,8 +221,15 @@
         });
       }
       async function loadMemories() {
-        try { renderMemories(await request('/api/memories?limit=100&offset=0')); }
-        catch (error) { memoryList.textContent = '加载记忆失败。'; showError(error.message); }
+        const requestId = ++memoryRequestId;
+        const parameters = new URLSearchParams({ limit: '100', offset: '0', sort_order: memorySortOrder.value });
+        if (memoryCategory.value) parameters.set('category', memoryCategory.value);
+        try {
+          const memories = await request(`/api/memories?${parameters.toString()}`);
+          if (requestId === memoryRequestId) renderMemories(memories);
+        } catch (error) {
+          if (requestId === memoryRequestId) { memoryList.textContent = '加载记忆失败。'; showError(error.message); }
+        }
       }
       chatForm.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -226,6 +257,8 @@
         themeToggle.textContent = theme === 'dark' ? '☀️ 浅色' : '🌙 深色';
       }
       themeToggle.addEventListener('click', () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
+      memoryCategory.addEventListener('change', loadMemories);
+      memorySortOrder.addEventListener('change', loadMemories);
       authForm.addEventListener('submit', (event) => { event.preventDefault(); authenticate('login'); });
       registerButton.addEventListener('click', () => authenticate('register'));
       logoutButton.addEventListener('click', async () => { try { await request('/api/auth/logout', { method: 'POST' }); } finally { showAuth(); } });

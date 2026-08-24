@@ -10,6 +10,8 @@ from typing import Any
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from memory_categories import CATEGORY_SYSTEM_PROMPT, DEFAULT_MEMORY_CATEGORY, MemoryCategory
+
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
@@ -99,3 +101,27 @@ def classify_intent(query: str) -> dict[str, Any]:
         "extracted_content": str(payload.get("extracted_content", "")),
         "extracted_tags": [str(tag) for tag in tags] if isinstance(tags, list) else [],
     }
+
+
+def classify_memory_category(content: str) -> MemoryCategory:
+    """Classify a memory, returning ``note`` for any invalid model result."""
+    try:
+        response = _get_client().chat.completions.create(
+            model=_model_name(),
+            messages=[
+                {"role": "system", "content": CATEGORY_SYSTEM_PROMPT},
+                {"role": "user", "content": f"<memory>\n{content}\n</memory>"},
+            ],
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+        payload = _parse_json_response(response.choices[0].message.content or "{}")
+        if set(payload) != {"category"}:
+            return DEFAULT_MEMORY_CATEGORY
+        try:
+            return MemoryCategory(payload["category"])
+        except (TypeError, ValueError):
+            return DEFAULT_MEMORY_CATEGORY
+    except Exception:
+        # Classification is best-effort: callers must still persist the original memory.
+        return DEFAULT_MEMORY_CATEGORY

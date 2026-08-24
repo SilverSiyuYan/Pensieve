@@ -8,8 +8,11 @@ import sqlite3
 from typing import Any
 from uuid import uuid4
 
+from memory_categories import DEFAULT_MEMORY_CATEGORY, MEMORY_CATEGORIES
+
 DATABASE_PATH = Path(__file__).resolve().parent / "memory.db"
 LEGACY_USER_ID = "00000000-0000-0000-0000-000000000000"
+_CATEGORY_SQL_VALUES = ", ".join(f"'{category}'" for category in MEMORY_CATEGORIES)
 
 CREATE_USERS_SQL = """CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -17,10 +20,12 @@ CREATE_USERS_SQL = """CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"""
 
-CREATE_MEMORIES_SQL = """CREATE TABLE IF NOT EXISTS memories (
+CREATE_MEMORIES_SQL = f"""CREATE TABLE IF NOT EXISTS memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    content TEXT NOT NULL, tags TEXT, category TEXT,
+    content TEXT NOT NULL, tags TEXT,
+    category TEXT NOT NULL DEFAULT '{DEFAULT_MEMORY_CATEGORY.value}'
+        CHECK(category IN ({_CATEGORY_SQL_VALUES})),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"""
 
@@ -89,18 +94,67 @@ def _migrate_legacy_memories(connection: sqlite3.Connection) -> None:
     connection.execute(CREATE_MEMORIES_SQL)
     connection.execute(
         """INSERT INTO memories (id, user_id, content, tags, category, created_at, updated_at)
-           SELECT id, ?, content, tags, category, created_at, updated_at FROM memories_legacy""",
+           SELECT id, ?, content, tags, 'note', created_at, updated_at FROM memories_legacy""",
         (LEGACY_USER_ID,),
     )
     connection.execute("DROP TABLE memories_legacy")
 
 
+def _migrate_memory_categories(connection: sqlite3.Connection) -> None:
+    """Constrain categories and map every pre-enum memory to the safe default."""
+    table_sql_row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='memories'"
+    ).fetchone()
+    if table_sql_row is None:
+        connection.execute(CREATE_MEMORIES_SQL)
+        return
+    table_sql = str(table_sql_row["sql"] or "").lower().replace('"', "").replace("`", "")
+    columns = {row["name"]: row for row in connection.execute("PRAGMA table_info(memories)")}
+    category = columns.get("category")
+    is_current = (
+        category is not None
+        and int(category["notnull"]) == 1
+        and str(category["dflt_value"] or "").strip("'") == DEFAULT_MEMORY_CATEGORY.value
+        and f"check(category in ({_CATEGORY_SQL_VALUES}))" in table_sql
+    )
+    if is_current:
+        return
+
+    connection.execute("PRAGMA foreign_keys = OFF")
+    connection.execute("PRAGMA legacy_alter_table = ON")
+    try:
+        connection.execute("BEGIN")
+        connection.execute("ALTER TABLE memories RENAME TO memories_pre_category_enum")
+        connection.execute(CREATE_MEMORIES_SQL)
+        connection.execute(
+            """INSERT INTO memories (id, user_id, content, tags, category, created_at, updated_at)
+               SELECT id, user_id, content, tags, 'note', created_at, updated_at
+               FROM memories_pre_category_enum"""
+        )
+        connection.execute("DROP TABLE memories_pre_category_enum")
+        violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            raise sqlite3.IntegrityError("Foreign key violation while migrating memory categories")
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.execute("PRAGMA legacy_alter_table = OFF")
+        connection.execute("PRAGMA foreign_keys = ON")
+
+
 def initialize_database() -> None:
-    with _connect() as connection:
+    connection = _connect()
+    try:
         connection.execute(CREATE_USERS_SQL)
         _migrate_legacy_memories(connection)
+        _migrate_memory_categories(connection)
         for statement in SCHEMA_SQL:
             connection.execute(statement)
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def create_user(email: str, password_hash: str) -> dict[str, Any]:
@@ -214,6 +268,7 @@ def list_messages(user_id: str, conversation_id: str, limit: int = 200) -> list[
 
 def add_memory(user_id: str, content: str, tags: str | None, category: str | None) -> int:
     initialize_database()
+    category = category or DEFAULT_MEMORY_CATEGORY.value
     with _connect() as connection:
         cursor = connection.execute(
             "INSERT INTO memories (user_id, content, tags, category) VALUES (?, ?, ?, ?)",
@@ -253,15 +308,26 @@ def get_memory(user_id: str, memory_id: int) -> dict[str, Any] | None:
     return _as_dict(row)
 
 
-def list_memories(user_id: str, limit: int = 20, offset: int = 0, category_filter: str | None = None) -> list[dict[str, Any]]:
+def list_memories(
+    user_id: str,
+    limit: int = 20,
+    offset: int = 0,
+    category_filter: str | None = None,
+    sort_order: str = "desc",
+) -> list[dict[str, Any]]:
     if limit < 0 or offset < 0:
         raise ValueError("limit and offset must be non-negative")
+    if category_filter is not None and category_filter not in MEMORY_CATEGORIES:
+        raise ValueError(f"category must be one of: {', '.join(MEMORY_CATEGORIES)}")
+    if sort_order not in {"asc", "desc"}:
+        raise ValueError("sort_order must be asc or desc")
     initialize_database()
     query, parameters = "SELECT * FROM memories WHERE user_id = ?", [user_id]
     if category_filter is not None:
         query += " AND category = ?"
         parameters.append(category_filter)
-    query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+    direction = "ASC" if sort_order == "asc" else "DESC"
+    query += f" ORDER BY created_at {direction}, id {direction} LIMIT ? OFFSET ?"
     parameters.extend([limit, offset])
     with _connect() as connection:
         rows = connection.execute(query, parameters).fetchall()

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 import sqlite3
 from typing import Any
@@ -28,6 +28,31 @@ CREATE_MEMORIES_SQL = f"""CREATE TABLE IF NOT EXISTS memories (
         CHECK(category IN ({_CATEGORY_SQL_VALUES})),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"""
+
+CREATE_MEMORY_DATE_MENTIONS_SQL = """CREATE TABLE IF NOT EXISTS memory_date_mentions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    memory_id INTEGER NOT NULL,
+    user_id TEXT NOT NULL,
+    start_date TEXT NOT NULL
+        CHECK(length(start_date) = 10 AND start_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    end_date TEXT NOT NULL
+        CHECK(length(end_date) = 10 AND end_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    original_expression TEXT NOT NULL,
+    normalized_text TEXT NOT NULL,
+    confidence REAL NOT NULL CHECK(confidence >= 0.0 AND confidence <= 1.0),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK(start_date <= end_date),
+    FOREIGN KEY(user_id, memory_id) REFERENCES memories(user_id, id) ON DELETE CASCADE)"""
+
+CREATE_MEMORY_DATE_EXTRACTIONS_SQL = """CREATE TABLE IF NOT EXISTS memory_date_extractions (
+    memory_id INTEGER PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('success', 'no_date', 'failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id, memory_id) REFERENCES memories(user_id, id) ON DELETE CASCADE)"""
 
 SCHEMA_SQL = [
     CREATE_USERS_SQL,
@@ -55,12 +80,21 @@ SCHEMA_SQL = [
         operation TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
         last_error TEXT, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_user_id_id ON memories(user_id, id)",
+    CREATE_MEMORY_DATE_MENTIONS_SQL,
+    CREATE_MEMORY_DATE_EXTRACTIONS_SQL,
     "CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash)",
     "CREATE INDEX IF NOT EXISTS idx_memories_user_created ON memories(user_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_memories_user_category ON memories(user_id, category)",
     "CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_messages_user_conversation ON messages(user_id, conversation_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_memory_tasks_user_status ON memory_tasks(user_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_memory_date_mentions_memory ON memory_date_mentions(memory_id)",
+    "CREATE INDEX IF NOT EXISTS idx_memory_date_mentions_user_dates ON memory_date_mentions(user_id, start_date, end_date)",
+    "CREATE INDEX IF NOT EXISTS idx_memory_date_mentions_start_date ON memory_date_mentions(start_date)",
+    "CREATE INDEX IF NOT EXISTS idx_memory_date_mentions_end_date ON memory_date_mentions(end_date)",
+    "CREATE INDEX IF NOT EXISTS idx_memory_date_extractions_status ON memory_date_extractions(status, memory_id)",
+    "CREATE INDEX IF NOT EXISTS idx_memory_date_extractions_user_status ON memory_date_extractions(user_id, status, memory_id)",
 ]
 
 
@@ -285,6 +319,317 @@ def add_memory(user_id: str, content: str, tags: str | None, category: str | Non
             (str(uuid4()), user_id, memory_id),
         )
     return memory_id
+
+
+def _iso_date(value: str) -> str:
+    """Validate and canonicalise a calendar date as ISO ``YYYY-MM-DD``."""
+    try:
+        parsed = date.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise ValueError("date must use the YYYY-MM-DD format") from None
+    if parsed.isoformat() != value:
+        raise ValueError("date must use the YYYY-MM-DD format")
+    return value
+
+
+def add_memory_date_mention(
+    user_id: str,
+    memory_id: int,
+    start_date: str,
+    end_date: str,
+    original_expression: str,
+    normalized_text: str,
+    confidence: float,
+) -> int:
+    """Attach one user-scoped event date or date range to a memory."""
+    initialize_database()
+    start_date = _iso_date(start_date)
+    end_date = _iso_date(end_date)
+    if start_date > end_date:
+        raise ValueError("start_date must not be after end_date")
+    if not 0.0 <= confidence <= 1.0:
+        raise ValueError("confidence must be between 0.0 and 1.0")
+    with _connect() as connection:
+        cursor = connection.execute(
+            """INSERT INTO memory_date_mentions (
+                   memory_id, user_id, start_date, end_date,
+                   original_expression, normalized_text, confidence
+               ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                memory_id,
+                user_id,
+                start_date,
+                end_date,
+                original_expression,
+                normalized_text,
+                confidence,
+            ),
+        )
+    return int(cursor.lastrowid)
+
+
+def replace_memory_date_mentions(
+    user_id: str, memory_id: int, mentions: list[dict[str, Any]]
+) -> list[int]:
+    """Atomically replace all extracted dates for one user-owned memory."""
+    validated: list[tuple[str, str, str, str, float]] = []
+    for mention in mentions:
+        start_date = _iso_date(mention["start_date"])
+        end_date = _iso_date(mention["end_date"])
+        confidence = float(mention["confidence"])
+        if start_date > end_date:
+            raise ValueError("start_date must not be after end_date")
+        if not 0.0 <= confidence <= 1.0:
+            raise ValueError("confidence must be between 0.0 and 1.0")
+        validated.append(
+            (
+                start_date,
+                end_date,
+                str(mention["original_expression"]),
+                str(mention["normalized_text"]),
+                confidence,
+            )
+        )
+
+    initialize_database()
+    inserted_ids: list[int] = []
+    with _connect() as connection:
+        owner = connection.execute(
+            "SELECT 1 FROM memories WHERE user_id = ? AND id = ?", (user_id, memory_id)
+        ).fetchone()
+        if owner is None:
+            raise ValueError("Memory not found")
+        connection.execute(
+            "DELETE FROM memory_date_mentions WHERE user_id = ? AND memory_id = ?",
+            (user_id, memory_id),
+        )
+        for start_date, end_date, original_expression, normalized_text, confidence in validated:
+            cursor = connection.execute(
+                """INSERT INTO memory_date_mentions (
+                       memory_id, user_id, start_date, end_date,
+                       original_expression, normalized_text, confidence
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    memory_id, user_id, start_date, end_date,
+                    original_expression, normalized_text, confidence,
+                ),
+            )
+            inserted_ids.append(int(cursor.lastrowid))
+    return inserted_ids
+
+
+def list_memory_date_mentions(user_id: str, memory_id: int | None = None) -> list[dict[str, Any]]:
+    """List date mentions visible to one user, optionally for one memory."""
+    initialize_database()
+    query = "SELECT * FROM memory_date_mentions WHERE user_id = ?"
+    parameters: list[Any] = [user_id]
+    if memory_id is not None:
+        query += " AND memory_id = ?"
+        parameters.append(memory_id)
+    query += " ORDER BY start_date, end_date, id"
+    with _connect() as connection:
+        rows = connection.execute(query, parameters).fetchall()
+    return [dict(row) for row in rows]
+
+
+def mark_memory_date_extraction(
+    user_id: str, memory_id: int, result_status: str, last_error: str | None = None
+) -> None:
+    """Record one isolated extraction attempt for a user-owned memory."""
+    if result_status not in {"success", "no_date", "failed"}:
+        raise ValueError("Invalid date extraction status")
+    error = last_error[:500] if last_error else None
+    initialize_database()
+    with _connect() as connection:
+        owner = connection.execute(
+            "SELECT 1 FROM memories WHERE user_id = ? AND id = ?", (user_id, memory_id)
+        ).fetchone()
+        if owner is None:
+            raise ValueError("Memory not found")
+        connection.execute(
+            """INSERT INTO memory_date_extractions (
+                   memory_id, user_id, status, attempts, last_error
+               ) VALUES (?, ?, ?, 1, ?)
+               ON CONFLICT(memory_id) DO UPDATE SET
+                   user_id = excluded.user_id,
+                   status = excluded.status,
+                   attempts = memory_date_extractions.attempts + 1,
+                   last_error = excluded.last_error,
+                   processed_at = CURRENT_TIMESTAMP,
+                   updated_at = CURRENT_TIMESTAMP""",
+            (memory_id, user_id, result_status, error),
+        )
+
+
+def list_memories_pending_date_extraction(
+    limit: int, user_id: str | None = None
+) -> list[dict[str, Any]]:
+    """Return unprocessed or failed memories in stable batches."""
+    if limit <= 0:
+        raise ValueError("limit must be greater than zero")
+    initialize_database()
+    query = """SELECT memories.* FROM memories
+               LEFT JOIN memory_date_extractions
+                 ON memory_date_extractions.user_id = memories.user_id
+                AND memory_date_extractions.memory_id = memories.id
+               WHERE (memory_date_extractions.memory_id IS NULL
+                      OR memory_date_extractions.status = 'failed')"""
+    parameters: list[Any] = []
+    if user_id is not None:
+        query += " AND memories.user_id = ?"
+        parameters.append(user_id)
+    # Process never-attempted rows before retries so a persistent early failure
+    # cannot starve later historical memories in every bounded batch.
+    query += """ ORDER BY
+        CASE WHEN memory_date_extractions.memory_id IS NULL THEN 0 ELSE 1 END,
+        memories.id LIMIT ?"""
+    parameters.append(limit)
+    with _connect() as connection:
+        rows = connection.execute(query, parameters).fetchall()
+    return [dict(row) for row in rows]
+
+
+def count_memories_pending_date_extraction(user_id: str | None = None) -> int:
+    """Count memories eligible for a first extraction or failed retry."""
+    initialize_database()
+    query = """SELECT COUNT(*) AS count FROM memories
+               LEFT JOIN memory_date_extractions
+                 ON memory_date_extractions.user_id = memories.user_id
+                AND memory_date_extractions.memory_id = memories.id
+               WHERE (memory_date_extractions.memory_id IS NULL
+                      OR memory_date_extractions.status = 'failed')"""
+    parameters: list[Any] = []
+    if user_id is not None:
+        query += " AND memories.user_id = ?"
+        parameters.append(user_id)
+    with _connect() as connection:
+        return int(connection.execute(query, parameters).fetchone()["count"])
+
+
+def get_memory_date_extraction(user_id: str, memory_id: int) -> dict[str, Any] | None:
+    """Read extraction state without exposing another user's record."""
+    initialize_database()
+    with _connect() as connection:
+        row = connection.execute(
+            "SELECT * FROM memory_date_extractions WHERE user_id = ? AND memory_id = ?",
+            (user_id, memory_id),
+        ).fetchone()
+    return _as_dict(row)
+
+
+def get_calendar_month_counts(
+    user_id: str,
+    first_day: str,
+    last_day: str,
+    utc_start: str,
+    utc_end: str,
+    local_time_modifier: str,
+) -> dict[str, dict[str, int]]:
+    """Return month-level created and mentioned counts with two aggregate queries."""
+    initialize_database()
+    counts: dict[str, dict[str, int]] = {}
+    with _connect() as connection:
+        created_rows = connection.execute(
+            """SELECT date(datetime(created_at, ?)) AS calendar_date,
+                      COUNT(*) AS count
+               FROM memories
+               WHERE user_id = ? AND created_at >= ? AND created_at < ?
+               GROUP BY calendar_date""",
+            (local_time_modifier, user_id, utc_start, utc_end),
+        ).fetchall()
+        mentioned_rows = connection.execute(
+            """WITH RECURSIVE calendar(calendar_date) AS (
+                   SELECT ?
+                   UNION ALL
+                   SELECT date(calendar_date, '+1 day') FROM calendar
+                   WHERE calendar_date < ?
+               )
+               SELECT calendar.calendar_date AS calendar_date,
+                      COUNT(DISTINCT memory_date_mentions.memory_id) AS count
+               FROM calendar
+               LEFT JOIN memory_date_mentions
+                 ON memory_date_mentions.user_id = ?
+                AND memory_date_mentions.start_date <= calendar.calendar_date
+                AND memory_date_mentions.end_date >= calendar.calendar_date
+               GROUP BY calendar.calendar_date""",
+            (first_day, last_day, user_id),
+        ).fetchall()
+    for row in created_rows:
+        counts.setdefault(str(row["calendar_date"]), {"created": 0, "mentioned": 0})[
+            "created"
+        ] = int(row["count"])
+    for row in mentioned_rows:
+        counts.setdefault(str(row["calendar_date"]), {"created": 0, "mentioned": 0})[
+            "mentioned"
+        ] = int(row["count"])
+    return counts
+
+
+def list_memories_created_between(
+    user_id: str, utc_start: str, utc_end: str, sort_order: str = "desc"
+) -> list[dict[str, Any]]:
+    """List one user's memories written inside a UTC half-open interval."""
+    if sort_order not in {"asc", "desc"}:
+        raise ValueError("sort_order must be asc or desc")
+    direction = "ASC" if sort_order == "asc" else "DESC"
+    initialize_database()
+    with _connect() as connection:
+        rows = connection.execute(
+            f"""SELECT * FROM memories
+                WHERE user_id = ? AND created_at >= ? AND created_at < ?
+                ORDER BY created_at {direction}, id {direction}""",
+            (user_id, utc_start, utc_end),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_memories_mentioning_date(
+    user_id: str, calendar_date: str, sort_order: str = "desc"
+) -> list[dict[str, Any]]:
+    """List one user's distinct memories whose extracted range covers a date."""
+    _iso_date(calendar_date)
+    if sort_order not in {"asc", "desc"}:
+        raise ValueError("sort_order must be asc or desc")
+    direction = "ASC" if sort_order == "asc" else "DESC"
+    initialize_database()
+    with _connect() as connection:
+        rows = connection.execute(
+            f"""SELECT memories.*,
+                       memory_date_mentions.id AS mention_id,
+                       memory_date_mentions.original_expression AS mention_original_expression,
+                       memory_date_mentions.normalized_text AS mention_normalized_text,
+                       memory_date_mentions.start_date AS mention_start_date,
+                       memory_date_mentions.end_date AS mention_end_date,
+                       memory_date_mentions.confidence AS mention_confidence
+                FROM memories
+                JOIN memory_date_mentions
+                  ON memory_date_mentions.user_id = memories.user_id
+                 AND memory_date_mentions.memory_id = memories.id
+                WHERE memories.user_id = ?
+                  AND memory_date_mentions.start_date <= ?
+                  AND memory_date_mentions.end_date >= ?
+                ORDER BY memories.created_at {direction}, memories.id {direction},
+                         memory_date_mentions.id ASC""",
+            (user_id, calendar_date, calendar_date),
+        ).fetchall()
+    grouped: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        memory_id = int(row["id"])
+        if memory_id not in grouped:
+            grouped[memory_id] = {
+                key: row[key]
+                for key in ("id", "user_id", "content", "tags", "category", "created_at", "updated_at")
+            }
+            grouped[memory_id]["date_mentions"] = []
+        grouped[memory_id]["date_mentions"].append({
+            "id": row["mention_id"],
+            "original_expression": row["mention_original_expression"],
+            "normalized_text": row["mention_normalized_text"],
+            "start_date": row["mention_start_date"],
+            "end_date": row["mention_end_date"],
+            "confidence": row["mention_confidence"],
+        })
+    return list(grouped.values())
 
 
 def mark_embedding_result(user_id: str, memory_id: int, error: str | None = None) -> None:

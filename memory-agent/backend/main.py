@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+from calendar import monthrange
+from datetime import UTC, date, datetime, time, timedelta, timezone
+import logging
 from pathlib import Path
 import sqlite3
 from typing import Annotated, Any, Literal
@@ -20,17 +23,27 @@ from database import (
     create_user,
     delete_memory,
     get_memory,
+    get_calendar_month_counts,
     get_or_create_conversation,
     get_user_by_email,
     initialize_database,
     list_conversations,
     list_memories,
+    list_memories_created_between,
+    list_memories_mentioning_date,
     list_messages,
+    mark_memory_date_extraction,
     mark_embedding_result,
+    replace_memory_date_mentions,
     search_memories_by_keyword,
     update_memory,
 )
-from llm_service import classify_intent, classify_memory_category, generate_integrated_answer
+from llm_service import (
+    classify_intent,
+    classify_memory_category,
+    extract_date_mentions,
+    generate_integrated_answer,
+)
 from memory_categories import MemoryCategory
 from vector_store import add_to_vector, delete_from_vector, rebuild_vector_store, search_similar
 
@@ -55,6 +68,9 @@ app.add_middleware(
 
 bearer = HTTPBearer(auto_error=False)
 MemorySortOrder = Literal["desc", "asc"]
+DEFAULT_TIMEZONE = "Asia/Shanghai"
+SHANGHAI_TIMEZONE = timezone(timedelta(hours=8), name=DEFAULT_TIMEZONE)
+logger = logging.getLogger(__name__)
 
 
 class AuthRequest(BaseModel):
@@ -119,12 +135,57 @@ def _session_response(user: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _memory_reference_datetime(memory: dict[str, Any]) -> datetime:
+    """Interpret SQLite CURRENT_TIMESTAMP as UTC, then use the UI timezone."""
+    created_at = datetime.fromisoformat(str(memory["created_at"]))
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    return created_at.astimezone(SHANGHAI_TIMEZONE)
+
+
+def _utc_boundary(value: date) -> str:
+    local_boundary = datetime.combine(value, time.min, tzinfo=SHANGHAI_TIMEZONE)
+    return local_boundary.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _refresh_memory_date_mentions(user_id: str, memory: dict[str, Any]) -> None:
+    """Best-effort extraction that never makes memory persistence fail."""
+    memory_id = int(memory["id"])
+    try:
+        mentions = extract_date_mentions(
+            str(memory["content"]), _memory_reference_datetime(memory), DEFAULT_TIMEZONE
+        )
+        replace_memory_date_mentions(user_id, memory_id, mentions)
+        mark_memory_date_extraction(
+            user_id, memory_id, "success" if mentions else "no_date"
+        )
+    except Exception as exc:
+        error_type = type(exc).__name__
+        logger.warning(
+            "Date mention extraction failed for user_id=%s memory_id=%s error_type=%s",
+            user_id,
+            memory_id,
+            error_type,
+        )
+        try:
+            # Edited content must not retain calendar dates extracted from its old text.
+            replace_memory_date_mentions(user_id, memory_id, [])
+            mark_memory_date_extraction(user_id, memory_id, "failed", error_type)
+        except Exception:
+            logger.warning(
+                "Failed to clear stale date mentions for user_id=%s memory_id=%s",
+                user_id,
+                memory_id,
+            )
+
+
 def _store_memory(user_id: str, content: str, tags: list[str], category: str | None) -> dict[str, Any]:
     tags_text = ",".join(tags)
     memory_id = add_memory(user_id, content, tags_text, category)
     memory = get_memory(user_id, memory_id)
     if memory is None:
         raise RuntimeError("Failed to read newly stored memory")
+    _refresh_memory_date_mentions(user_id, memory)
     try:
         add_to_vector(user_id, memory_id, content, {
             "tags": tags_text, "category": category, "created_at": memory["created_at"]
@@ -248,6 +309,68 @@ def get_memories(
     )
 
 
+@app.get("/api/calendar/month")
+def get_calendar_month(
+    current_user: CurrentUser,
+    year: int = Query(ge=1, le=9998),
+    month: int = Query(ge=1, le=12),
+) -> dict[str, Any]:
+    first_day = date(year, month, 1)
+    day_count = monthrange(year, month)[1]
+    last_day = date(year, month, day_count)
+    next_month = last_day + timedelta(days=1)
+    counts = get_calendar_month_counts(
+        str(current_user["id"]),
+        first_day.isoformat(),
+        last_day.isoformat(),
+        _utc_boundary(first_day),
+        _utc_boundary(next_month),
+        "+8 hours",
+    )
+    days = []
+    for day_number in range(1, day_count + 1):
+        calendar_day = date(year, month, day_number)
+        day_counts = counts.get(calendar_day.isoformat(), {"created": 0, "mentioned": 0})
+        created_count = day_counts["created"]
+        mentioned_count = day_counts["mentioned"]
+        days.append({
+            "date": calendar_day.isoformat(),
+            "weekday": calendar_day.isoweekday(),
+            "created_count": created_count,
+            "mentioned_count": mentioned_count,
+            "has_content": created_count > 0 or mentioned_count > 0,
+        })
+    return {
+        "year": year,
+        "month": month,
+        "timezone": DEFAULT_TIMEZONE,
+        "days": days,
+    }
+
+
+@app.get("/api/calendar/day")
+def get_calendar_day(
+    current_user: CurrentUser,
+    calendar_date: date = Query(alias="date"),
+    sort_order: MemorySortOrder = "desc",
+) -> dict[str, Any]:
+    if calendar_date == date.max:
+        raise HTTPException(status_code=422, detail="date is outside the supported range")
+    next_day = calendar_date + timedelta(days=1)
+    user_id = str(current_user["id"])
+    return {
+        "date": calendar_date.isoformat(),
+        "timezone": DEFAULT_TIMEZONE,
+        "sort_order": sort_order,
+        "created_memories": list_memories_created_between(
+            user_id, _utc_boundary(calendar_date), _utc_boundary(next_day), sort_order
+        ),
+        "mentioned_memories": list_memories_mentioning_date(
+            user_id, calendar_date.isoformat(), sort_order
+        ),
+    }
+
+
 @app.get("/api/conversations")
 def get_conversations(
     current_user: CurrentUser, limit: int = Query(default=50, ge=1, le=100)
@@ -272,8 +395,18 @@ def remove_memory(memory_id: int, current_user: CurrentUser) -> dict[str, Any]:
     user_id = str(current_user["id"])
     if get_memory(user_id, memory_id) is None:
         raise HTTPException(status_code=404, detail="Memory not found")
-    delete_from_vector(user_id, memory_id)
     delete_memory(user_id, memory_id)
+    try:
+        delete_from_vector(user_id, memory_id)
+    except Exception as exc:
+        # SQLite is authoritative. Retrieval re-checks user_id + memory_id in
+        # SQLite, and a later vector rebuild removes any stale derived entry.
+        logger.warning(
+            "Vector cleanup failed after memory deletion user_id=%s memory_id=%s error_type=%s",
+            user_id,
+            memory_id,
+            type(exc).__name__,
+        )
     return {"success": True, "memory_id": memory_id, "message": "记忆已删除"}
 
 
@@ -294,6 +427,7 @@ def edit_memory(memory_id: int, payload: MemoryUpdateRequest, current_user: Curr
     updated = get_memory(user_id, memory_id)
     assert updated is not None
     if content_changed:
+        _refresh_memory_date_mentions(user_id, updated)
         try:
             add_to_vector(user_id, memory_id, content, {
                 "tags": tags, "category": category, "created_at": updated["created_at"]

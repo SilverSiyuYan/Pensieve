@@ -20,6 +20,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         lambda query, memories: "；".join(item["content"] for item in memories) or "没有找到记忆",
     )
     monkeypatch.setattr(main, "classify_memory_category", lambda content: "todo")
+    monkeypatch.setattr(main, "extract_date_mentions", lambda content, reference, timezone: [])
     with TestClient(main.app) as test_client:
         yield test_client
 
@@ -85,6 +86,28 @@ def test_user_b_cannot_retrieve_or_delete_user_a_memory(client: TestClient) -> N
 
     assert client.delete(f"/api/memory/{memory_id}", headers=auth(token_b)).status_code == 404
     assert client.delete(f"/api/memory/{memory_id}", headers=auth(token_a)).status_code == 200
+
+
+def test_vector_cleanup_failure_does_not_block_authoritative_memory_delete(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    token = register(client, "delete-vector-failure@example.com")
+    stored = client.post(
+        "/api/memory/store", headers=auth(token), json={"content": "仍应可以删除"}
+    )
+    memory_id = stored.json()["memory_id"]
+
+    def fail_vector_cleanup(user_id: str, target_id: int) -> None:
+        del user_id, target_id
+        raise PermissionError("sensitive storage path")
+
+    monkeypatch.setattr(main, "delete_from_vector", fail_vector_cleanup)
+    response = client.delete(f"/api/memory/{memory_id}", headers=auth(token))
+
+    assert response.status_code == 200
+    assert client.get("/api/memories", headers=auth(token)).json() == []
+    assert "Vector cleanup failed after memory deletion" in caplog.text
+    assert "sensitive storage path" not in caplog.text
 
 
 def test_logout_revokes_session(client: TestClient) -> None:
@@ -210,3 +233,96 @@ def test_memory_list_rejects_invalid_query_parameters(client: TestClient) -> Non
     assert "category" in str(invalid_category.json())
     assert invalid_sort.status_code == 422
     assert "sort_order" in str(invalid_sort.json())
+
+
+def test_content_edit_replaces_old_date_mentions_but_tags_edit_does_not_extract(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+
+    def extracted_dates(content: str, reference, timezone: str) -> list[dict]:
+        calls.append(content)
+        expression, event_date = ("明天", "2026-08-25") if "明天" in content else ("后天", "2026-08-26")
+        return [{
+            "original_expression": expression,
+            "normalized_text": "开会",
+            "start_date": event_date,
+            "end_date": event_date,
+            "confidence": 0.95,
+        }]
+
+    monkeypatch.setattr(main, "extract_date_mentions", extracted_dates)
+    token = register(client, "date-edit@example.com")
+    stored = client.post("/api/memory/store", headers=auth(token), json={"content": "明天开会"})
+    memory_id = stored.json()["memory_id"]
+    user_id = client.get("/api/auth/me", headers=auth(token)).json()["id"]
+    assert [item["start_date"] for item in database.list_memory_date_mentions(user_id, memory_id)] == [
+        "2026-08-25"
+    ]
+
+    tags_only = client.patch(
+        f"/api/memory/{memory_id}", headers=auth(token), json={"tags": ["工作"]}
+    )
+    assert tags_only.status_code == 200
+    assert calls == ["明天开会"]
+
+    edited = client.patch(
+        f"/api/memory/{memory_id}", headers=auth(token), json={"content": "后天开会"}
+    )
+    assert edited.status_code == 200
+    mentions = database.list_memory_date_mentions(user_id, memory_id)
+    assert calls == ["明天开会", "后天开会"]
+    assert [(item["original_expression"], item["start_date"]) for item in mentions] == [
+        ("后天", "2026-08-26")
+    ]
+
+
+@pytest.mark.parametrize("failure", [ValueError("invalid JSON"), TimeoutError("model timed out")])
+def test_date_extraction_failure_does_not_fail_memory_storage(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, failure: Exception
+) -> None:
+    def fail_extraction(content: str, reference, timezone: str) -> list[dict]:
+        raise failure
+
+    monkeypatch.setattr(main, "extract_date_mentions", fail_extraction)
+    token = register(client, f"failure-{type(failure).__name__}@example.com")
+
+    response = client.post(
+        "/api/memory/store", headers=auth(token), json={"content": "明天开会"}
+    )
+
+    assert response.status_code == 200
+    user_id = client.get("/api/auth/me", headers=auth(token)).json()["id"]
+    assert database.get_memory(user_id, response.json()["memory_id"])["content"] == "明天开会"
+    assert database.list_memory_date_mentions(user_id, response.json()["memory_id"]) == []
+    assert "Date mention extraction failed" in caplog.text
+
+
+def test_extracted_date_mentions_are_isolated_between_users(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def extracted_dates(content: str, reference, timezone: str) -> list[dict]:
+        event_date = "2026-08-25" if content.startswith("A") else "2026-08-26"
+        return [{
+            "original_expression": "明天" if content.startswith("A") else "后天",
+            "normalized_text": content,
+            "start_date": event_date,
+            "end_date": event_date,
+            "confidence": 0.9,
+        }]
+
+    monkeypatch.setattr(main, "extract_date_mentions", extracted_dates)
+    token_a = register(client, "dates-a@example.com")
+    token_b = register(client, "dates-b@example.com")
+    memory_a = client.post(
+        "/api/memory/store", headers=auth(token_a), json={"content": "A 明天开会"}
+    ).json()["memory_id"]
+    memory_b = client.post(
+        "/api/memory/store", headers=auth(token_b), json={"content": "B 后天游泳"}
+    ).json()["memory_id"]
+    user_a = client.get("/api/auth/me", headers=auth(token_a)).json()["id"]
+    user_b = client.get("/api/auth/me", headers=auth(token_b)).json()["id"]
+
+    assert [item["memory_id"] for item in database.list_memory_date_mentions(user_a)] == [memory_a]
+    assert [item["memory_id"] for item in database.list_memory_date_mentions(user_b)] == [memory_b]
+    assert database.list_memory_date_mentions(user_b, memory_a) == []

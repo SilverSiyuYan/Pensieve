@@ -36,3 +36,78 @@ def test_category_labels_empty_error_and_narrow_layout_are_present() -> None:
     assert "加载记忆失败。" in HTML
     assert "@media (max-width:480px)" in HTML
     assert ".memory-controls { grid-template-columns:1fr; }" in HTML
+
+
+def test_calendar_navigation_and_monday_first_layout_are_present() -> None:
+    assert 'id="calendar-view-button"' in HTML
+    assert '>日历</button>' in HTML
+    assert 'id="calendar-title"' in HTML
+    assert '>上个月</button>' in HTML
+    assert '>今天</button>' in HTML
+    assert '>下个月</button>' in HTML
+    weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    positions = [HTML.index(f'<span class="weekday">{weekday}</span>') for weekday in weekdays]
+    assert positions == sorted(positions)
+    assert "payload.days[0].weekday - 1" in HTML
+
+
+def test_calendar_month_switching_and_api_loading_are_wired() -> None:
+    assert "shiftCalendarMonth(-1)" in HTML
+    assert "shiftCalendarMonth(1)" in HTML
+    assert "loadCalendarMonth()" in HTML
+    assert "`/api/calendar/month?year=${calendarYear}&month=${calendarMonth}`" in HTML
+    assert "calendarTitle.textContent = `${payload.year} 年 ${payload.month} 月`" in HTML
+
+
+def test_calendar_highlights_today_and_selected_date() -> None:
+    assert "timeZone: 'Asia/Shanghai'" in HTML
+    assert "cell.classList.add('today')" in HTML
+    assert "cell.classList.add('selected')" in HTML
+    assert ".calendar-day.today .day-number" in HTML
+    assert ".calendar-day.selected" in HTML
+
+
+def test_clicking_calendar_day_loads_two_semantic_groups() -> None:
+    assert "cell.addEventListener('click', () => selectCalendarDay(day.date))" in HTML
+    assert "`/api/calendar/day?date=${dateKey}&sort_order=${calendarSortOrder.value}`" in HTML
+    assert '>当天写入 <span id="created-memory-count"></span>' in HTML
+    assert '>内容提及当天 <span id="mentioned-memory-count"></span>' in HTML
+    assert "payload.created_memories" in HTML
+    assert "payload.mentioned_memories" in HTML
+
+
+def test_calendar_counts_hide_zero_values() -> None:
+    assert "if (day.created_count > 0)" in HTML
+    assert "if (day.mentioned_count > 0)" in HTML
+    assert "写入 ${day.created_count}" in HTML
+    assert "提及 ${day.mentioned_count}" in HTML
+
+
+def test_calendar_empty_loading_and_error_states_are_present() -> None:
+    assert "正在加载月历…" in HTML
+    assert "正在加载当天详情…" in HTML
+    assert "当天没有写入记忆。" in HTML
+    assert "没有记忆提及当天。" in HTML
+    assert "月历加载失败：${error.message}" in HTML
+    assert "当天详情加载失败：${error.message}" in HTML
+
+
+def test_calendar_mentioned_memories_show_original_expressions() -> None:
+    assert "memory.date_mentions || []" in HTML
+    assert "原始日期：${mention.original_expression}" in HTML
+    assert "renderCalendarGroup(mentionedMemoryList, payload.mentioned_memories" in HTML
+
+
+def test_calendar_sort_control_reloads_selected_day() -> None:
+    assert 'id="calendar-sort-order"' in HTML
+    assert '<option value="desc">从近到远</option>' in HTML
+    assert '<option value="asc">从远到近</option>' in HTML
+    assert "calendarSortOrder.addEventListener('change'" in HTML
+    assert "if (selectedCalendarDate) loadCalendarDay(selectedCalendarDate)" in HTML
+
+
+def test_calendar_mobile_layout_stacks_panels_and_compacts_cells() -> None:
+    assert "@media (max-width:820px)" in HTML
+    assert ".layout,.calendar-view { grid-template-columns:1fr; }" in HTML
+    assert "@media (max-width:600px)" in HTML
+    assert ".calendar-day,.calendar-blank { min-height:64px; padding:4px; }" in HTML

@@ -118,6 +118,98 @@ def test_delete_memory() -> None:
     assert database.get_memory(user_id, memory_id) is None
 
 
+def test_memory_date_mentions_support_multiple_dates_and_stable_iso_format() -> None:
+    user_id = create_test_user()
+    memory_id = database.add_memory(user_id, "明天开会，8 月 30 日提交报告", None, "todo")
+
+    first_id = database.add_memory_date_mention(
+        user_id, memory_id, "2026-08-25", "2026-08-25", "明天", "开会", 0.98
+    )
+    second_id = database.add_memory_date_mention(
+        user_id, memory_id, "2026-08-30", "2026-08-30", "8 月 30 日", "提交报告", 0.95
+    )
+
+    mentions = database.list_memory_date_mentions(user_id, memory_id)
+    assert [mention["id"] for mention in mentions] == [first_id, second_id]
+    assert mentions[0]["start_date"] == "2026-08-25"
+    assert mentions[0]["end_date"] == "2026-08-25"
+    assert mentions[1]["original_expression"] == "8 月 30 日"
+    assert mentions[1]["normalized_text"] == "提交报告"
+
+
+def test_memory_date_mentions_validate_dates_ranges_and_confidence() -> None:
+    user_id = create_test_user()
+    memory_id = database.add_memory(user_id, "日期校验", None, "note")
+
+    with pytest.raises(ValueError, match="YYYY-MM-DD"):
+        database.add_memory_date_mention(user_id, memory_id, "2026-02-30", "2026-03-01", "日期", "事件", 1.0)
+    with pytest.raises(ValueError, match="start_date"):
+        database.add_memory_date_mention(user_id, memory_id, "2026-09-02", "2026-09-01", "日期", "事件", 1.0)
+    with pytest.raises(ValueError, match="confidence"):
+        database.add_memory_date_mention(user_id, memory_id, "2026-09-01", "2026-09-01", "日期", "事件", 1.1)
+
+
+def test_memory_date_mentions_are_isolated_by_composite_foreign_key() -> None:
+    user_a = str(database.create_user("date-a@example.com", "hash")["id"])
+    user_b = str(database.create_user("date-b@example.com", "hash")["id"])
+    memory_id = database.add_memory(user_a, "A 的明日安排", None, "todo")
+    database.add_memory_date_mention(
+        user_a, memory_id, "2026-08-25", "2026-08-25", "明日", "A 的安排", 0.9
+    )
+
+    assert database.list_memory_date_mentions(user_b) == []
+    with pytest.raises(Exception):
+        database.add_memory_date_mention(
+            user_b, memory_id, "2026-08-25", "2026-08-25", "明日", "越权关联", 0.9
+        )
+
+
+def test_deleting_memory_cascades_to_date_mentions() -> None:
+    user_id = create_test_user()
+    memory_id = database.add_memory(user_id, "下周一到周三出差", None, "todo")
+    database.add_memory_date_mention(
+        user_id, memory_id, "2026-08-31", "2026-09-02", "下周一到周三", "出差", 0.9
+    )
+    database.mark_memory_date_extraction(user_id, memory_id, "success")
+
+    assert database.delete_memory(user_id, memory_id) is True
+    assert database.list_memory_date_mentions(user_id, memory_id) == []
+    assert database.get_memory_date_extraction(user_id, memory_id) is None
+
+
+def test_date_mention_migration_preserves_existing_memories_and_creates_indexes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    migration_path = tmp_path / "date-mention-migration.db"
+    monkeypatch.setattr(database, "DATABASE_PATH", migration_path)
+    database.initialize_database()
+    user_id = create_test_user()
+    memory_id = database.add_memory(user_id, "迁移前记忆", None, "note")
+    with database._connect() as connection:
+        connection.execute("DROP TABLE memory_date_mentions")
+
+    database.initialize_database()
+    database.initialize_database()
+
+    assert database.get_memory(user_id, memory_id)["content"] == "迁移前记忆"
+    with database._connect() as migrated:
+        indexes = {
+            row["name"] for row in migrated.execute("PRAGMA index_list(memory_date_mentions)")
+        }
+        assert {
+            "idx_memory_date_mentions_memory",
+            "idx_memory_date_mentions_user_dates",
+            "idx_memory_date_mentions_start_date",
+            "idx_memory_date_mentions_end_date",
+        } <= indexes
+        foreign_keys = migrated.execute("PRAGMA foreign_key_list(memory_date_mentions)").fetchall()
+        assert {(row["from"], row["to"], row["on_delete"]) for row in foreign_keys} == {
+            ("user_id", "user_id", "CASCADE"),
+            ("memory_id", "id", "CASCADE"),
+        }
+        assert migrated.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
 def test_memories_are_isolated_by_user() -> None:
     user_a = str(database.create_user("a@example.com", "hash")["id"])
     user_b = str(database.create_user("b@example.com", "hash")["id"])

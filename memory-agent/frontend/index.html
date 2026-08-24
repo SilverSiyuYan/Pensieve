@@ -57,15 +57,47 @@
       .delete { padding:4px 7px; color:var(--danger); background:transparent; font-size:.82rem; }
       .delete:hover { background:color-mix(in srgb,var(--danger) 12%,transparent); }
       .empty-list { color:var(--muted); text-align:center; padding:26px 10px; } .error { color:var(--danger); font-size:.9rem; margin:0 16px 12px; }
-      @media (max-width:820px) { .app-shell { padding:12px; } .layout { grid-template-columns:1fr; } .chat-panel { min-height:62vh; } .memory-list { max-height:44vh; } }
-      @media (max-width:480px) { .topbar { align-items:flex-start; } .subtitle { display:none; } .chat-history { padding:15px; } .message { max-width:96%; } .composer { padding:12px; } .send { padding:12px; } .memory-controls { grid-template-columns:1fr; } }
+      .view-nav { display:flex; gap:5px; padding:4px; background:var(--surface-muted); border-radius:12px; }
+      .view-nav button { padding:7px 11px; color:var(--muted); background:transparent; }
+      .view-nav button.active { color:var(--primary-text); background:var(--primary); }
+      .calendar-view { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(320px,.8fr); gap:20px; }
+      .calendar-panel,.calendar-detail { padding:18px; min-width:0; }
+      .calendar-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
+      .calendar-toolbar h2 { margin:0; font-size:1.2rem; text-align:center; }
+      .calendar-actions { display:flex; gap:7px; }
+      .calendar-button { padding:8px 10px; color:var(--text); background:var(--surface-muted); border:1px solid var(--border); }
+      .weekday-row,.calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); }
+      .weekday { padding:8px 4px; color:var(--muted); text-align:center; font-size:.8rem; font-weight:600; }
+      .calendar-grid { border-top:1px solid var(--border); border-left:1px solid var(--border); }
+      .calendar-day,.calendar-blank { min-height:96px; padding:8px; border:0; border-right:1px solid var(--border); border-bottom:1px solid var(--border); border-radius:0; background:var(--surface); color:var(--text); text-align:left; }
+      .calendar-day:hover { z-index:1; background:var(--surface-muted); transform:none; }
+      .calendar-day.today .day-number { color:var(--primary-text); background:var(--primary); }
+      .calendar-day.selected { z-index:1; outline:2px solid var(--primary); outline-offset:-2px; background:color-mix(in srgb,var(--primary) 8%,var(--surface)); }
+      .day-number { display:grid; width:28px; height:28px; place-items:center; border-radius:50%; font-weight:700; }
+      .day-counts { display:flex; flex-direction:column; align-items:flex-start; gap:4px; margin-top:7px; }
+      .day-count { padding:2px 5px; border-radius:6px; color:var(--muted); background:var(--surface-muted); font-size:.68rem; white-space:nowrap; }
+      .day-count.mentioned { color:var(--primary); }
+      .calendar-status { color:var(--muted); text-align:center; padding:28px 8px; }
+      .calendar-detail-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:14px; }
+      .calendar-detail-heading h2 { margin:0; font-size:1.05rem; }
+      .calendar-sort { padding:7px 8px; color:var(--text); background:var(--surface-muted); border:1px solid var(--border); border-radius:9px; }
+      .calendar-section + .calendar-section { margin-top:20px; padding-top:18px; border-top:1px solid var(--border); }
+      .calendar-section h3 { margin:0 0 10px; font-size:.95rem; }
+      .calendar-memory-list { display:flex; flex-direction:column; gap:10px; }
+      .calendar-memory { padding:12px; background:var(--surface-muted); border:1px solid var(--border); border-radius:12px; }
+      .calendar-memory p { margin:0 0 9px; line-height:1.45; }
+      .calendar-memory-footer { display:flex; flex-wrap:wrap; align-items:center; gap:7px; color:var(--muted); font-size:.76rem; }
+      .date-expression { padding:3px 7px; border-radius:20px; color:var(--primary); background:color-mix(in srgb,var(--primary) 12%,transparent); }
+      @media (max-width:820px) { .app-shell { padding:12px; } .layout,.calendar-view { grid-template-columns:1fr; } .chat-panel { min-height:62vh; } .memory-list { max-height:44vh; } .calendar-day,.calendar-blank { min-height:82px; } }
+      @media (max-width:600px) { .topbar { align-items:flex-start; flex-direction:column; } .top-actions { width:100%; flex-wrap:wrap; } .calendar-panel,.calendar-detail { padding:12px; } .calendar-toolbar { align-items:stretch; flex-direction:column; } .calendar-toolbar h2 { order:-1; } .calendar-actions { justify-content:space-between; } .calendar-day,.calendar-blank { min-height:64px; padding:4px; } .day-count { padding:1px 3px; font-size:.58rem; } }
+      @media (max-width:480px) { .subtitle { display:none; } .chat-history { padding:15px; } .message { max-width:96%; } .composer { padding:12px; } .send { padding:12px; } .memory-controls { grid-template-columns:1fr; } }
     </style>
   </head>
   <body>
     <main class="app-shell">
       <header class="topbar">
         <div><h1>智能记忆助手</h1><p class="subtitle">记录、检索并整理属于你的长期记忆</p></div>
-        <div class="top-actions"><span id="account-name" class="account-name"></span><button id="logout-button" class="theme-toggle" type="button" hidden>退出</button><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换深浅色模式">🌙 深色</button></div>
+        <div class="top-actions"><nav id="view-nav" class="view-nav" aria-label="主导航" hidden><button id="memory-view-button" class="active" type="button">记忆</button><button id="calendar-view-button" type="button">日历</button></nav><span id="account-name" class="account-name"></span><button id="logout-button" class="theme-toggle" type="button" hidden>退出</button><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换深浅色模式">🌙 深色</button></div>
       </header>
       <section id="auth-panel" class="panel auth-panel">
         <h2>登录记忆账户</h2><p class="subtitle">登录后，每个账户拥有独立的长期记忆。</p>
@@ -102,6 +134,26 @@
           <div id="memory-list" class="memory-list"></div>
         </aside>
       </section>
+      <section id="calendar-view" class="calendar-view" hidden>
+        <section class="panel calendar-panel" aria-label="月历">
+          <div class="calendar-toolbar">
+            <div class="calendar-actions"><button id="calendar-previous" class="calendar-button" type="button">上个月</button><button id="calendar-today" class="calendar-button" type="button">今天</button></div>
+            <h2 id="calendar-title"></h2>
+            <div class="calendar-actions"><button id="calendar-next" class="calendar-button" type="button">下个月</button></div>
+          </div>
+          <div class="weekday-row" aria-hidden="true"><span class="weekday">周一</span><span class="weekday">周二</span><span class="weekday">周三</span><span class="weekday">周四</span><span class="weekday">周五</span><span class="weekday">周六</span><span class="weekday">周日</span></div>
+          <div id="calendar-status" class="calendar-status">正在加载月历…</div>
+          <div id="calendar-grid" class="calendar-grid" hidden></div>
+        </section>
+        <aside class="panel calendar-detail" aria-label="日期详情">
+          <div class="calendar-detail-heading"><h2 id="calendar-detail-title">请选择日期</h2><select id="calendar-sort-order" class="calendar-sort" aria-label="日历记忆排序"><option value="desc">从近到远</option><option value="asc">从远到近</option></select></div>
+          <div id="calendar-detail-status" class="calendar-status">点击月历中的日期查看详情。</div>
+          <div id="calendar-detail-content" hidden>
+            <section class="calendar-section"><h3>当天写入 <span id="created-memory-count"></span></h3><div id="created-memory-list" class="calendar-memory-list"></div></section>
+            <section class="calendar-section"><h3>内容提及当天 <span id="mentioned-memory-count"></span></h3><div id="mentioned-memory-list" class="calendar-memory-list"></div></section>
+          </div>
+        </aside>
+      </section>
     </main>
     <script>
       // 可通过 ?apiBase=http://localhost:8001 或 localStorage 的 memory-agent-api-base 覆盖地址。
@@ -111,8 +163,24 @@
       let accessToken = localStorage.getItem('memory-agent-access-token') || '';
       let currentConversationId = null;
       let memoryRequestId = 0;
+      let calendarMonthRequestId = 0;
+      let calendarDayRequestId = 0;
+      let selectedCalendarDate = '';
+      let calendarMonthPayload = null;
+      const shanghaiToday = () => {
+        const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+        const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+        return `${values.year}-${values.month}-${values.day}`;
+      };
+      const initialCalendarDate = shanghaiToday();
+      let calendarYear = Number(initialCalendarDate.slice(0, 4));
+      let calendarMonth = Number(initialCalendarDate.slice(5, 7));
       const authPanel = document.querySelector('#auth-panel');
       const appLayout = document.querySelector('#app-layout');
+      const viewNav = document.querySelector('#view-nav');
+      const memoryViewButton = document.querySelector('#memory-view-button');
+      const calendarViewButton = document.querySelector('#calendar-view-button');
+      const calendarView = document.querySelector('#calendar-view');
       const authForm = document.querySelector('#auth-form');
       const authEmail = document.querySelector('#auth-email');
       const authPassword = document.querySelector('#auth-password');
@@ -129,6 +197,20 @@
       const memoryCount = document.querySelector('#memory-count');
       const memoryCategory = document.querySelector('#memory-category');
       const memorySortOrder = document.querySelector('#memory-sort-order');
+      const calendarTitle = document.querySelector('#calendar-title');
+      const calendarGrid = document.querySelector('#calendar-grid');
+      const calendarStatus = document.querySelector('#calendar-status');
+      const calendarPrevious = document.querySelector('#calendar-previous');
+      const calendarToday = document.querySelector('#calendar-today');
+      const calendarNext = document.querySelector('#calendar-next');
+      const calendarSortOrder = document.querySelector('#calendar-sort-order');
+      const calendarDetailTitle = document.querySelector('#calendar-detail-title');
+      const calendarDetailStatus = document.querySelector('#calendar-detail-status');
+      const calendarDetailContent = document.querySelector('#calendar-detail-content');
+      const createdMemoryList = document.querySelector('#created-memory-list');
+      const mentionedMemoryList = document.querySelector('#mentioned-memory-list');
+      const createdMemoryCount = document.querySelector('#created-memory-count');
+      const mentionedMemoryCount = document.querySelector('#mentioned-memory-count');
       const themeToggle = document.querySelector('#theme-toggle');
       const scrollChatToBottom = () => { chatHistory.scrollTop = chatHistory.scrollHeight; };
       function showError(message) { chatError.textContent = message; chatError.hidden = false; }
@@ -147,12 +229,21 @@
       }
       function showAuth(message = '') {
         accessToken = ''; currentConversationId = null; localStorage.removeItem('memory-agent-access-token');
-        authPanel.hidden = false; appLayout.hidden = true; logoutButton.hidden = true; accountName.textContent = '';
+        authPanel.hidden = false; appLayout.hidden = true; calendarView.hidden = true; viewNav.hidden = true; logoutButton.hidden = true; accountName.textContent = '';
         authError.textContent = message; authError.hidden = !message;
       }
       function showApp(user) {
-        authPanel.hidden = true; appLayout.hidden = false; logoutButton.hidden = false; accountName.textContent = user.email;
-        loadMemories(); userInput.focus();
+        authPanel.hidden = true; viewNav.hidden = false; logoutButton.hidden = false; accountName.textContent = user.email;
+        showMemoryView(); loadMemories(); userInput.focus();
+      }
+      function showMemoryView() {
+        appLayout.hidden = false; calendarView.hidden = true;
+        memoryViewButton.classList.add('active'); calendarViewButton.classList.remove('active');
+      }
+      function showCalendarView() {
+        appLayout.hidden = true; calendarView.hidden = false;
+        memoryViewButton.classList.remove('active'); calendarViewButton.classList.add('active');
+        loadCalendarMonth();
       }
       async function authenticate(mode) {
         authError.hidden = true;
@@ -231,6 +322,92 @@
           if (requestId === memoryRequestId) { memoryList.textContent = '加载记忆失败。'; showError(error.message); }
         }
       }
+      function renderCalendarMonth(payload) {
+        calendarMonthPayload = payload;
+        calendarTitle.textContent = `${payload.year} 年 ${payload.month} 月`;
+        calendarGrid.replaceChildren();
+        const leadingBlanks = payload.days.length ? payload.days[0].weekday - 1 : 0;
+        const totalCells = Math.ceil((leadingBlanks + payload.days.length) / 7) * 7;
+        for (let index = 0; index < totalCells; index += 1) {
+          if (index < leadingBlanks || index >= leadingBlanks + payload.days.length) {
+            const blank = document.createElement('span'); blank.className = 'calendar-blank'; blank.setAttribute('aria-hidden', 'true'); calendarGrid.append(blank); continue;
+          }
+          const day = payload.days[index - leadingBlanks];
+          const cell = document.createElement('button'); cell.type = 'button'; cell.className = 'calendar-day'; cell.dataset.date = day.date;
+          if (day.date === shanghaiToday()) cell.classList.add('today');
+          if (day.date === selectedCalendarDate) cell.classList.add('selected');
+          cell.setAttribute('aria-label', `${day.date}，当天写入 ${day.created_count} 条，内容提及 ${day.mentioned_count} 条`);
+          const number = document.createElement('span'); number.className = 'day-number'; number.textContent = String(Number(day.date.slice(8, 10)));
+          const counts = document.createElement('span'); counts.className = 'day-counts';
+          if (day.created_count > 0) { const created = document.createElement('span'); created.className = 'day-count'; created.textContent = `写入 ${day.created_count}`; counts.append(created); }
+          if (day.mentioned_count > 0) { const mentioned = document.createElement('span'); mentioned.className = 'day-count mentioned'; mentioned.textContent = `提及 ${day.mentioned_count}`; counts.append(mentioned); }
+          cell.append(number, counts); cell.addEventListener('click', () => selectCalendarDay(day.date)); calendarGrid.append(cell);
+        }
+        calendarStatus.hidden = true; calendarGrid.hidden = false;
+      }
+      async function loadCalendarMonth() {
+        const requestId = ++calendarMonthRequestId;
+        calendarGrid.hidden = true; calendarStatus.hidden = false; calendarStatus.textContent = '正在加载月历…';
+        try {
+          const payload = await request(`/api/calendar/month?year=${calendarYear}&month=${calendarMonth}`);
+          if (requestId === calendarMonthRequestId) renderCalendarMonth(payload);
+        } catch (error) {
+          if (requestId === calendarMonthRequestId) { calendarMonthPayload = null; calendarStatus.textContent = `月历加载失败：${error.message}`; }
+        }
+      }
+      function renderCalendarMemory(memory, includeExpressions) {
+        const card = document.createElement('article'); card.className = 'calendar-memory';
+        const content = document.createElement('p'); content.textContent = memory.content; card.append(content);
+        const footer = document.createElement('div'); footer.className = 'calendar-memory-footer';
+        const categoryLabels = { inspiration: '灵感', todo: '待办', knowledge: '知识点', note: '便签' };
+        const category = document.createElement('span'); category.className = 'category-badge'; category.textContent = categoryLabels[memory.category] || '便签'; footer.append(category);
+        const writtenAt = document.createElement('time');
+        if (memory.created_at) {
+          const utcTimestamp = new Date(`${memory.created_at.replace(' ', 'T')}Z`);
+          writtenAt.textContent = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(utcTimestamp);
+        } else writtenAt.textContent = '未知时间';
+        footer.append(writtenAt);
+        if (includeExpressions) {
+          (memory.date_mentions || []).forEach((mention) => { const expression = document.createElement('span'); expression.className = 'date-expression'; expression.textContent = `原始日期：${mention.original_expression}`; footer.append(expression); });
+        }
+        card.append(footer); return card;
+      }
+      function renderCalendarGroup(container, memories, emptyText, includeExpressions) {
+        container.replaceChildren();
+        if (!memories.length) { const empty = document.createElement('p'); empty.className = 'empty-list'; empty.textContent = emptyText; container.append(empty); return; }
+        memories.forEach((memory) => container.append(renderCalendarMemory(memory, includeExpressions)));
+      }
+      function renderCalendarDay(payload) {
+        calendarDetailTitle.textContent = `${payload.date} 详情`;
+        createdMemoryCount.textContent = `（${payload.created_memories.length} 条）`;
+        mentionedMemoryCount.textContent = `（${payload.mentioned_memories.length} 条）`;
+        renderCalendarGroup(createdMemoryList, payload.created_memories, '当天没有写入记忆。', false);
+        renderCalendarGroup(mentionedMemoryList, payload.mentioned_memories, '没有记忆提及当天。', true);
+        calendarDetailStatus.hidden = true; calendarDetailContent.hidden = false;
+      }
+      async function loadCalendarDay(dateKey) {
+        const requestId = ++calendarDayRequestId;
+        calendarDetailContent.hidden = true; calendarDetailStatus.hidden = false; calendarDetailStatus.textContent = '正在加载当天详情…';
+        try {
+          const payload = await request(`/api/calendar/day?date=${dateKey}&sort_order=${calendarSortOrder.value}`);
+          if (requestId === calendarDayRequestId) renderCalendarDay(payload);
+        } catch (error) {
+          if (requestId === calendarDayRequestId) calendarDetailStatus.textContent = `当天详情加载失败：${error.message}`;
+        }
+      }
+      function selectCalendarDay(dateKey) {
+        selectedCalendarDate = dateKey;
+        if (calendarMonthPayload) renderCalendarMonth(calendarMonthPayload);
+        loadCalendarDay(dateKey);
+      }
+      function shiftCalendarMonth(delta) {
+        const nextIndex = calendarYear * 12 + (calendarMonth - 1) + delta;
+        const nextYear = Math.floor(nextIndex / 12); const nextMonth = (nextIndex % 12 + 12) % 12 + 1;
+        if (nextYear < 1 || nextYear > 9998) return;
+        calendarYear = nextYear; calendarMonth = nextMonth; selectedCalendarDate = '';
+        calendarDetailTitle.textContent = '请选择日期'; calendarDetailContent.hidden = true; calendarDetailStatus.hidden = false; calendarDetailStatus.textContent = '点击月历中的日期查看详情。';
+        loadCalendarMonth();
+      }
       chatForm.addEventListener('submit', async (event) => {
         event.preventDefault();
         const input = userInput.value.trim(); if (!input) return;
@@ -259,6 +436,15 @@
       themeToggle.addEventListener('click', () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
       memoryCategory.addEventListener('change', loadMemories);
       memorySortOrder.addEventListener('change', loadMemories);
+      memoryViewButton.addEventListener('click', showMemoryView);
+      calendarViewButton.addEventListener('click', showCalendarView);
+      calendarPrevious.addEventListener('click', () => shiftCalendarMonth(-1));
+      calendarNext.addEventListener('click', () => shiftCalendarMonth(1));
+      calendarToday.addEventListener('click', async () => {
+        const today = shanghaiToday(); calendarYear = Number(today.slice(0, 4)); calendarMonth = Number(today.slice(5, 7)); selectedCalendarDate = today;
+        await loadCalendarMonth(); selectCalendarDay(today);
+      });
+      calendarSortOrder.addEventListener('change', () => { if (selectedCalendarDate) loadCalendarDay(selectedCalendarDate); });
       authForm.addEventListener('submit', (event) => { event.preventDefault(); authenticate('login'); });
       registerButton.addEventListener('click', () => authenticate('register'));
       logoutButton.addEventListener('click', async () => { try { await request('/api/auth/logout', { method: 'POST' }); } finally { showAuth(); } });

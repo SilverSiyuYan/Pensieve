@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 from typing import Any
+from datetime import datetime, timezone
 import os
 
 import llm_service
@@ -197,3 +198,91 @@ def test_non_exact_structured_output_falls_back_to_note(monkeypatch, response_co
 def test_canonical_category_definition_matches_prompt_contract() -> None:
     assert MEMORY_CATEGORIES == ("inspiration", "todo", "knowledge", "note")
     assert all(category in CATEGORY_SYSTEM_PROMPT for category in MEMORY_CATEGORIES)
+
+
+@pytest.mark.parametrize(
+    ("content", "response_content", "expected"),
+    [
+        (
+            "2026 年 8 月 30 日开会",
+            '{"mentions":[{"original_expression":"2026 年 8 月 30 日","normalized_text":"开会","start_date":"2026-08-30","end_date":"2026-08-30","confidence":0.99}]}',
+            [("2026-08-30", "2026-08-30")],
+        ),
+        (
+            "8 月 30 日开会",
+            '{"mentions":[{"original_expression":"8 月 30 日","normalized_text":"开会","start_date":"2026-08-30","end_date":"2026-08-30","confidence":0.98}]}',
+            [("2026-08-30", "2026-08-30")],
+        ),
+        (
+            "明天提交报告",
+            '{"mentions":[{"original_expression":"明天","normalized_text":"提交报告","start_date":"2026-08-25","end_date":"2026-08-25","confidence":0.98}]}',
+            [("2026-08-25", "2026-08-25")],
+        ),
+        (
+            "今天整理资料，明天提交，后天复盘，下周一开会",
+            '{"mentions":[{"original_expression":"今天","normalized_text":"整理资料","start_date":"2026-08-24","end_date":"2026-08-24","confidence":0.98},{"original_expression":"明天","normalized_text":"提交","start_date":"2026-08-25","end_date":"2026-08-25","confidence":0.98},{"original_expression":"后天","normalized_text":"复盘","start_date":"2026-08-26","end_date":"2026-08-26","confidence":0.98},{"original_expression":"下周一","normalized_text":"开会","start_date":"2026-08-31","end_date":"2026-08-31","confidence":0.98}]}',
+            [("2026-08-24", "2026-08-24"), ("2026-08-25", "2026-08-25"), ("2026-08-26", "2026-08-26"), ("2026-08-31", "2026-08-31")],
+        ),
+        (
+            "周四开会，周五游泳",
+            '{"mentions":[{"original_expression":"周四","normalized_text":"开会","start_date":"2026-08-27","end_date":"2026-08-27","confidence":0.95},{"original_expression":"周五","normalized_text":"游泳","start_date":"2026-08-28","end_date":"2026-08-28","confidence":0.95}]}',
+            [("2026-08-27", "2026-08-27"), ("2026-08-28", "2026-08-28")],
+        ),
+        (
+            "8 月 25 日到 8 月 27 日参加培训",
+            '{"mentions":[{"original_expression":"8 月 25 日到 8 月 27 日","normalized_text":"参加培训","start_date":"2026-08-25","end_date":"2026-08-27","confidence":0.97}]}',
+            [("2026-08-25", "2026-08-27")],
+        ),
+        ("今天没有安排", '{"mentions":[]}', []),
+        ("以后学习英语，有时间去运动", '{"mentions":[]}', []),
+        ("阿波罗 11 号于 1969 年登月", '{"mentions":[]}', []),
+        ("每周五跑步", '{"mentions":[]}', []),
+    ],
+)
+def test_extract_date_mentions_uses_strict_structured_output(
+    monkeypatch, content: str, response_content: str, expected: list[tuple[str, str]]
+) -> None:
+    client, completions = mock_client(response_content)
+    monkeypatch.setattr(llm_service, "_client", client)
+    reference = datetime(2026, 8, 24, 18, 0, tzinfo=timezone.utc)
+
+    result = llm_service.extract_date_mentions(content, reference, "Asia/Shanghai")
+
+    assert [(item["start_date"], item["end_date"]) for item in result] == expected
+    call = completions.calls[0]
+    assert call["response_format"] == {"type": "json_object"}
+    assert call["temperature"] == 0
+    assert "Reference datetime: 2026-08-24T18:00:00+00:00" in call["messages"][1]["content"]
+    assert "Timezone: Asia/Shanghai" in call["messages"][1]["content"]
+
+
+@pytest.mark.parametrize(
+    "response_content",
+    [
+        "not json",
+        '{}',
+        '{"mentions":"tomorrow"}',
+        '{"mentions":[{"original_expression":"明天","normalized_text":"开会","start_date":"2026-02-30","end_date":"2026-02-30","confidence":0.9}]}',
+        '{"mentions":[{"original_expression":"模型编造的文本","normalized_text":"开会","start_date":"2026-08-25","end_date":"2026-08-25","confidence":0.9}]}',
+    ],
+)
+def test_extract_date_mentions_rejects_invalid_llm_output(monkeypatch, response_content: str) -> None:
+    client, _ = mock_client(response_content)
+    monkeypatch.setattr(llm_service, "_client", client)
+    with pytest.raises((ValueError, KeyError)):
+        llm_service.extract_date_mentions(
+            "明天开会", datetime(2026, 8, 24, tzinfo=timezone.utc), "Asia/Shanghai"
+        )
+
+
+def test_extract_date_mentions_propagates_llm_timeout(monkeypatch) -> None:
+    class FailingCompletions:
+        def create(self, **kwargs):
+            raise TimeoutError("model timed out")
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=FailingCompletions()))
+    monkeypatch.setattr(llm_service, "_client", client)
+    with pytest.raises(TimeoutError, match="timed out"):
+        llm_service.extract_date_mentions(
+            "明天开会", datetime(2026, 8, 24, tzinfo=timezone.utc), "Asia/Shanghai"
+        )

@@ -30,10 +30,10 @@ const timeout = transportError({ name: 'AbortError' }, 'http://127.0.0.1:8001', 
 assert.equal(timeout.kind, 'timeout');
 assert.match(timeout.message, /请求超时/);
 
-assert.equal(validateHealthResponse({ application: 'memory-agent', version: '0.2.0', status: 'ok', database_accessible: true }).version, '0.2.0');
+assert.equal(validateHealthResponse({ application: 'memory-agent', version: '0.2.0', status: 'ok', database_accessible: true, timezone: 'Asia/Shanghai' }).timezone, 'Asia/Shanghai');
 assert.throws(() => validateHealthResponse({ application: 'other-service', version: '9.0', status: 'ok', database_accessible: true }), (error) => error.kind === 'version');
 assert.throws(() => validateHealthResponse({ application: 'memory-agent', status: 'ok', database_accessible: true }), (error) => error.kind === 'version');
-assert.throws(() => validateHealthResponse({ application: 'memory-agent', version: '0.2.0', status: 'degraded', database_accessible: false }), (error) => error.kind === 'database');
+assert.throws(() => validateHealthResponse({ application: 'memory-agent', version: '0.2.0', status: 'degraded', database_accessible: false, timezone: 'Asia/Shanghai' }), (error) => error.kind === 'database');
 
 (async () => {
   const nonJson = { ok: true, status: 200, headers: { get: () => 'text/html' }, json: async () => { throw new SyntaxError('bad json'); } };

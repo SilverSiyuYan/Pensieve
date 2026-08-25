@@ -47,6 +47,15 @@ Rules:
 - If nothing qualifies, return {"mentions":[]}.
 - Do not return Markdown, explanations, extra fields, or null values."""
 
+QUERY_DATE_MENTION_SYSTEM_PROMPT = DATE_MENTION_SYSTEM_PROMPT.replace(
+    "from one memory", "from one memory query"
+).replace(
+    "one memory.", "one memory query."
+).replace(
+    "the user's event, task, plan, or experience.",
+    "the user's event, task, plan, or experience; for a query, extract the date being asked about."
+)
+
 _client: OpenAI | None = None
 
 
@@ -69,25 +78,49 @@ def _model_name() -> str:
     return os.getenv("MODEL_NAME", "qwen-plus")
 
 
-def _memory_prompt(query: str, retrieved_memories: list[dict[str, Any]]) -> str:
+def _memory_prompt(
+    query: str,
+    retrieved_memories: list[dict[str, Any]],
+    temporal_filter: dict[str, Any] | None = None,
+) -> str:
     lines = [f"用户问题：{query}", "相关记忆条目："]
+    if temporal_filter:
+        lines.insert(
+            1,
+            "问题中的时间已解析为："
+            f"{temporal_filter['start_date']} 至 {temporal_filter['end_date']} "
+            f"({temporal_filter['timezone']})。只能根据该范围过滤后的记忆回答，"
+            "并在回答中明确写出解析后的实际日期。",
+        )
     for index, memory in enumerate(retrieved_memories, start=1):
         lines.append(
             f"{index}. [{memory.get('created_at', '')}] {memory.get('content', '')}"
             f"（标签：{memory.get('tags', '')}）"
         )
+        for mention in memory.get("date_mentions", []):
+            lines.append(
+                "   事件日期："
+                f"{mention.get('start_date', '')} 至 {mention.get('end_date', '')} "
+                f"({mention.get('timezone_name', '')})；"
+                f"原始表达：{mention.get('original_expression', '')}"
+            )
     return "\n".join(lines)
 
 
 def generate_integrated_answer(
-    query: str, retrieved_memories: list[dict[str, Any]]
+    query: str,
+    retrieved_memories: list[dict[str, Any]],
+    temporal_filter: dict[str, Any] | None = None,
 ) -> str:
     """Ask the LLM to combine semantic-search results into a natural answer."""
     response = _get_client().chat.completions.create(
         model=_model_name(),
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": _memory_prompt(query, retrieved_memories)},
+            {
+                "role": "user",
+                "content": _memory_prompt(query, retrieved_memories, temporal_filter),
+            },
         ],
         temperature=0.4,
     )
@@ -191,7 +224,10 @@ def _validated_date_mention(payload: Any, content: str) -> dict[str, Any]:
 
 
 def extract_date_mentions(
-    content: str, reference_datetime: datetime, timezone_name: str = "Asia/Shanghai"
+    content: str,
+    reference_datetime: datetime,
+    timezone_name: str = "Asia/Shanghai",
+    purpose: str = "memory",
 ) -> list[dict[str, Any]]:
     """Extract strictly validated calendar dates using the shared LLM client."""
     if reference_datetime.tzinfo is None:
@@ -199,13 +235,16 @@ def extract_date_mentions(
     response = _get_client().chat.completions.create(
         model=_model_name(),
         messages=[
-            {"role": "system", "content": DATE_MENTION_SYSTEM_PROMPT},
+            {
+                "role": "system",
+                "content": QUERY_DATE_MENTION_SYSTEM_PROMPT if purpose == "query" else DATE_MENTION_SYSTEM_PROMPT,
+            },
             {
                 "role": "user",
                 "content": (
                     f"Reference datetime: {reference_datetime.isoformat()}\n"
                     f"Timezone: {timezone_name}\n"
-                    f"<memory>\n{content}\n</memory>"
+                    f"<{purpose}>\n{content}\n</{purpose}>"
                 ),
             },
         ],

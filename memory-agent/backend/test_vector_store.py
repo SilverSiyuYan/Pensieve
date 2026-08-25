@@ -57,3 +57,15 @@ def test_vector_search_is_isolated_by_user() -> None:
 
     assert vector_store.search_similar("user-b", "我周五做什么") == []
     assert vector_store.search_similar("user-a", "我周五做什么")[0]["content"] == "我周五游泳"
+
+
+def test_vector_search_within_cannot_escape_structured_candidate_ids() -> None:
+    metadata = {"tags": "", "category": "todo", "created_at": "2026-08-25"}
+    vector_store.add_to_vector("user-a", 10, "明天生物课观察细胞", metadata)
+    vector_store.add_to_vector("user-a", 11, "昨天生物课观察细胞", metadata)
+
+    results = vector_store.search_similar_within(
+        "user-a", "生物课相关", [10], top_k=5
+    )
+
+    assert [item["memory_id"] for item in results] == [10]

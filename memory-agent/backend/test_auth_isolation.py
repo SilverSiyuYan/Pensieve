@@ -19,10 +19,12 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         main,
         "generate_integrated_answer",
-        lambda query, memories: "；".join(item["content"] for item in memories) or "没有找到记忆",
+        lambda query, memories, *args: "；".join(item["content"] for item in memories) or "没有找到记忆",
     )
     monkeypatch.setattr(main, "classify_memory_category", lambda content: "todo")
-    monkeypatch.setattr(main, "extract_date_mentions", lambda content, reference, timezone: [])
+    monkeypatch.setattr(
+        main, "extract_date_mentions", lambda content, reference, timezone, **kwargs: []
+    )
     with TestClient(main.application) as test_client:
         yield test_client
 

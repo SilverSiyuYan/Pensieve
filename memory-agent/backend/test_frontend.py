@@ -88,7 +88,8 @@ def test_calendar_month_switching_and_api_loading_are_wired() -> None:
 
 
 def test_calendar_highlights_today_and_selected_date() -> None:
-    assert "timeZone: 'Asia/Shanghai'" in HTML
+    assert "timeZone: applicationTimezone" in HTML
+    assert "applicationTimezone = health.timezone" in HTML
     assert "cell.classList.add('today')" in HTML
     assert "cell.classList.add('selected')" in HTML
     assert ".calendar-day.today .day-number" in HTML

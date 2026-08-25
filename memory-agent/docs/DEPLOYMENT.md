@@ -30,6 +30,7 @@
 | `OPENAI_BASE_URL` | 是 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | OpenAI 兼容 API 根地址 |
 | `MODEL_NAME` | 是 | `qwen-plus` | Chat Completions 模型名称 |
 | `SESSION_TTL_HOURS` | 是 | `24` | 登录 Session 有效小时数 |
+| `APP_TIMEZONE` | 是 | `Asia/Shanghai` | 日期解析、月历和时间问答统一使用的 IANA 时区 |
 | `CORS_ALLOWED_ORIGINS` | 是 | `https://memory.example.com` | 允许的前端源；多个值用英文逗号分隔 |
 
 当前版本的数据库和 Chroma 路径由代码固定。容器镜像通过符号链接把它们统一存放到 `/data`，Compose 再把 `/data` 挂载为持久卷。
@@ -74,6 +75,29 @@ docker compose down
 FastAPI 启动时会自动创建或迁移用户、Session、对话、消息、记忆、embedding 和任务表。`backend/init_db.py` 只初始化结构，不写入演示数据。
 
 旧单用户记忆会迁移到禁用的 legacy 用户，不会被新账户看到。迁移前必须完成备份。
+
+### 日期索引升级与历史回填
+
+相对日期在记忆写入时以该条记录自身的 `created_at` 和 `APP_TIMEZONE` 解析，结果保存到
+`memory_date_mentions`。月历和时间问答共同查询该表，不会在查询当天重新解释历史原文。
+启动时会安全补充 `timezone_name`、`temporal_type` 等兼容字段，已有绝对日期不会重算。
+
+升级前先停止写入并备份 SQLite 与 Chroma 数据。随后预览待处理数量：
+
+```bash
+cd backend
+python backfill_date_mentions.py --dry-run --batch-size 1000
+```
+
+确认 `would_reuse_existing_dates` 与 `would_extract_from_created_at` 后分批执行：
+
+```bash
+python backfill_date_mentions.py --batch-size 50
+```
+
+重复执行直至 `eligible_total` 为 0。已有结构化日期只补齐成功状态；缺少日期的记录使用其自身
+`created_at` 回填；无法可靠解析的记录标记为 `failed`，不会伪造日期。操作可重复执行且不会追加
+重复事件日期。回填后抽样比较月历日期、时间问答的 `temporal_filter` 和 `source_memories`。
 
 如果当前登录用户的 SQLite 数据存在但向量索引丢失，可携带该用户 Bearer Token 执行：
 

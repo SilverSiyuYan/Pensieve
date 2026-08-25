@@ -49,6 +49,25 @@ def test_generate_integrated_answer_builds_required_prompts(monkeypatch) -> None
     assert "2. [2026-08-22] 周五游泳（标签：周五,运动）" in call["messages"][1]["content"]
 
 
+def test_temporal_answer_prompt_includes_resolved_hard_filter(monkeypatch) -> None:
+    client, completions = mock_client("明天（2026-08-26）提交报告。")
+    monkeypatch.setattr(llm_service, "_client", client)
+
+    llm_service.generate_integrated_answer(
+        "明天要做什么",
+        [{"content": "明天提交报告", "date_mentions": []}],
+        {
+            "start_date": "2026-08-26",
+            "end_date": "2026-08-26",
+            "timezone": "Asia/Shanghai",
+        },
+    )
+
+    prompt = completions.calls[0]["messages"][1]["content"]
+    assert "2026-08-26 至 2026-08-26" in prompt
+    assert "只能根据该范围过滤后的记忆回答" in prompt
+
+
 def test_classify_intent_parses_store_json_and_builds_prompt(monkeypatch) -> None:
     client, completions = mock_client(
         '{"intent":"store","extracted_content":"下周三交报告","extracted_tags":["下周三","工作"]}'

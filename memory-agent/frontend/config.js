@@ -2,4 +2,6 @@
 window.MEMORY_AGENT_CONFIG = Object.freeze({
   // Empty means the same origin (the Docker/Nginx deployment default).
   apiBase: '',
+  // Must match backend APP_TIMEZONE; the health response remains authoritative.
+  timezone: 'Asia/Shanghai',
 });

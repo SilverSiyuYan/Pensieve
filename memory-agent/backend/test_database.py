@@ -135,6 +135,28 @@ def test_memory_date_mentions_support_multiple_dates_and_stable_iso_format() -> 
     assert mentions[0]["end_date"] == "2026-08-25"
     assert mentions[1]["original_expression"] == "8 月 30 日"
     assert mentions[1]["normalized_text"] == "提交报告"
+    assert mentions[0]["timezone_name"] == "Asia/Shanghai"
+    assert mentions[0]["temporal_type"] == "date"
+
+
+def test_memory_range_query_reuses_calendar_date_mentions() -> None:
+    user_id = create_test_user()
+    old = database.add_memory(user_id, "明天去银行", None, "todo")
+    current = database.add_memory(user_id, "明天交作业", None, "todo")
+    database.add_memory_date_mention(
+        user_id, old, "2026-08-11", "2026-08-11", "明天", "去银行", 0.98
+    )
+    database.add_memory_date_mention(
+        user_id, current, "2026-08-21", "2026-08-21", "明天", "交作业", 0.99
+    )
+
+    results = database.list_memories_mentioning_range(
+        user_id, "2026-08-21", "2026-08-21"
+    )
+
+    assert [item["id"] for item in results] == [current]
+    assert results[0]["date_mentions"][0]["original_expression"] == "明天"
+    assert results[0]["date_mentions"][0]["timezone_name"] == "Asia/Shanghai"
 
 
 def test_memory_date_mentions_validate_dates_ranges_and_confidence() -> None:

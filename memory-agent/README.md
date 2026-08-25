@@ -38,6 +38,7 @@ flowchart LR
 - `backend/vector_store.py`：ChromaDB 索引和召回。
 - `backend/llm_service.py`：模型客户端、意图分类和回答生成。
 - SQLite 是可备份的权威数据；ChromaDB 是可通过重建接口恢复的派生索引。
+- 相对日期在写入时按记忆自身的 `created_at` 和 `APP_TIMEZONE` 固化到 `memory_date_mentions`；月历和时间问答复用同一结构化日期索引。带日期的问题先做日期硬过滤，再在候选内进行语义排序。
 
 ## 快速开始：Docker Compose（推荐）
 
@@ -161,6 +162,15 @@ python -m pytest backend -q -p no:cacheprovider
 ```
 
 测试不会调用真实 LLM。测试覆盖注册、登录状态、注销、数据库隔离、向量隔离和跨用户越权。
+
+历史日期索引升级前应备份数据，然后先预览、再分批回填：
+
+```bash
+python backend/backfill_date_mentions.py --dry-run --batch-size 1000
+python backend/backfill_date_mentions.py --batch-size 50
+```
+
+完整迁移语义、幂等性和回滚建议见 `docs/DEPLOYMENT.md` 的“日期索引升级与历史回填”。
 
 ## 生产部署注意事项
 

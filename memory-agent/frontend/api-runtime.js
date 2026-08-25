@@ -59,6 +59,9 @@
     if (health.status !== 'ok' || health.database_accessible !== true) {
       throw new ApiError('database', '后端已连接，但数据库当前不可访问。');
     }
+    if (typeof health.timezone !== 'string' || !health.timezone) {
+      throw new ApiError('version', '健康检查缺少项目时区，前后端版本可能不匹配。');
+    }
     return health;
   }
 

@@ -9,6 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from memory_categories import DEFAULT_MEMORY_CATEGORY, MEMORY_CATEGORIES
+from settings import TIMEZONE_NAME
 
 DATABASE_PATH = Path(__file__).resolve().parent / "memory.db"
 LEGACY_USER_ID = "00000000-0000-0000-0000-000000000000"
@@ -39,6 +40,9 @@ CREATE_MEMORY_DATE_MENTIONS_SQL = """CREATE TABLE IF NOT EXISTS memory_date_ment
         CHECK(length(end_date) = 10 AND end_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
     original_expression TEXT NOT NULL,
     normalized_text TEXT NOT NULL,
+    timezone_name TEXT NOT NULL DEFAULT 'Asia/Shanghai',
+    temporal_type TEXT NOT NULL DEFAULT 'date'
+        CHECK(temporal_type IN ('date', 'date_range')),
     confidence REAL NOT NULL CHECK(confidence >= 0.0 AND confidence <= 1.0),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK(start_date <= end_date),
@@ -195,6 +199,20 @@ def initialize_database() -> None:
         _migrate_memory_categories(connection)
         for statement in SCHEMA_SQL:
             connection.execute(statement)
+        mention_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(memory_date_mentions)")
+        }
+        if "timezone_name" not in mention_columns:
+            connection.execute(
+                "ALTER TABLE memory_date_mentions ADD COLUMN timezone_name TEXT NOT NULL DEFAULT 'Asia/Shanghai'"
+            )
+        if "temporal_type" not in mention_columns:
+            connection.execute(
+                "ALTER TABLE memory_date_mentions ADD COLUMN temporal_type TEXT NOT NULL DEFAULT 'date'"
+            )
+            connection.execute(
+                "UPDATE memory_date_mentions SET temporal_type = 'date_range' WHERE start_date <> end_date"
+            )
         connection.commit()
     finally:
         connection.close()
@@ -349,6 +367,8 @@ def add_memory_date_mention(
     original_expression: str,
     normalized_text: str,
     confidence: float,
+    timezone_name: str = TIMEZONE_NAME,
+    temporal_type: str | None = None,
 ) -> int:
     """Attach one user-scoped event date or date range to a memory."""
     initialize_database()
@@ -358,12 +378,16 @@ def add_memory_date_mention(
         raise ValueError("start_date must not be after end_date")
     if not 0.0 <= confidence <= 1.0:
         raise ValueError("confidence must be between 0.0 and 1.0")
+    temporal_type = temporal_type or ("date" if start_date == end_date else "date_range")
+    if temporal_type not in {"date", "date_range"}:
+        raise ValueError("temporal_type must be date or date_range")
     with _connect() as connection:
         cursor = connection.execute(
             """INSERT INTO memory_date_mentions (
                    memory_id, user_id, start_date, end_date,
-                   original_expression, normalized_text, confidence
-               ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   original_expression, normalized_text, timezone_name,
+                   temporal_type, confidence
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 memory_id,
                 user_id,
@@ -371,6 +395,8 @@ def add_memory_date_mention(
                 end_date,
                 original_expression,
                 normalized_text,
+                timezone_name,
+                temporal_type,
                 confidence,
             ),
         )
@@ -381,7 +407,7 @@ def replace_memory_date_mentions(
     user_id: str, memory_id: int, mentions: list[dict[str, Any]]
 ) -> list[int]:
     """Atomically replace all extracted dates for one user-owned memory."""
-    validated: list[tuple[str, str, str, str, float]] = []
+    validated: list[tuple[str, str, str, str, str, str, float]] = []
     for mention in mentions:
         start_date = _iso_date(mention["start_date"])
         end_date = _iso_date(mention["end_date"])
@@ -396,6 +422,10 @@ def replace_memory_date_mentions(
                 end_date,
                 str(mention["original_expression"]),
                 str(mention["normalized_text"]),
+                str(mention.get("timezone_name") or TIMEZONE_NAME),
+                str(mention.get("temporal_type") or (
+                    "date" if start_date == end_date else "date_range"
+                )),
                 confidence,
             )
         )
@@ -412,15 +442,22 @@ def replace_memory_date_mentions(
             "DELETE FROM memory_date_mentions WHERE user_id = ? AND memory_id = ?",
             (user_id, memory_id),
         )
-        for start_date, end_date, original_expression, normalized_text, confidence in validated:
+        for (
+            start_date, end_date, original_expression, normalized_text,
+            timezone_name, temporal_type, confidence,
+        ) in validated:
+            if temporal_type not in {"date", "date_range"}:
+                raise ValueError("temporal_type must be date or date_range")
             cursor = connection.execute(
                 """INSERT INTO memory_date_mentions (
                        memory_id, user_id, start_date, end_date,
-                       original_expression, normalized_text, confidence
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                       original_expression, normalized_text, timezone_name,
+                       temporal_type, confidence
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     memory_id, user_id, start_date, end_date,
-                    original_expression, normalized_text, confidence,
+                    original_expression, normalized_text, timezone_name,
+                    temporal_type, confidence,
                 ),
             )
             inserted_ids.append(int(cursor.lastrowid))
@@ -477,7 +514,11 @@ def list_memories_pending_date_extraction(
     if limit <= 0:
         raise ValueError("limit must be greater than zero")
     initialize_database()
-    query = """SELECT memories.* FROM memories
+    query = """SELECT memories.*,
+                      (SELECT COUNT(*) FROM memory_date_mentions
+                       WHERE memory_date_mentions.user_id = memories.user_id
+                         AND memory_date_mentions.memory_id = memories.id) AS date_mention_count
+               FROM memories
                LEFT JOIN memory_date_extractions
                  ON memory_date_extractions.user_id = memories.user_id
                 AND memory_date_extractions.memory_id = memories.id
@@ -510,6 +551,18 @@ def count_memories_pending_date_extraction(user_id: str | None = None) -> int:
     parameters: list[Any] = []
     if user_id is not None:
         query += " AND memories.user_id = ?"
+        parameters.append(user_id)
+    with _connect() as connection:
+        return int(connection.execute(query, parameters).fetchone()["count"])
+
+
+def count_memories_with_date_mentions(user_id: str | None = None) -> int:
+    """Count distinct memories that already have authoritative absolute dates."""
+    initialize_database()
+    query = "SELECT COUNT(DISTINCT memory_id) AS count FROM memory_date_mentions"
+    parameters: list[Any] = []
+    if user_id is not None:
+        query += " WHERE user_id = ?"
         parameters.append(user_id)
     with _connect() as connection:
         return int(connection.execute(query, parameters).fetchone()["count"])
@@ -609,6 +662,8 @@ def list_memories_mentioning_date(
                        memory_date_mentions.normalized_text AS mention_normalized_text,
                        memory_date_mentions.start_date AS mention_start_date,
                        memory_date_mentions.end_date AS mention_end_date,
+                       memory_date_mentions.timezone_name AS mention_timezone_name,
+                       memory_date_mentions.temporal_type AS mention_temporal_type,
                        memory_date_mentions.confidence AS mention_confidence
                 FROM memories
                 JOIN memory_date_mentions
@@ -636,6 +691,62 @@ def list_memories_mentioning_date(
             "normalized_text": row["mention_normalized_text"],
             "start_date": row["mention_start_date"],
             "end_date": row["mention_end_date"],
+            "timezone_name": row["mention_timezone_name"],
+            "temporal_type": row["mention_temporal_type"],
+            "confidence": row["mention_confidence"],
+        })
+    return list(grouped.values())
+
+
+def list_memories_mentioning_range(
+    user_id: str, start_date: str, end_date: str, sort_order: str = "desc"
+) -> list[dict[str, Any]]:
+    """Return memories whose authoritative parsed dates overlap a query range."""
+    start_date = _iso_date(start_date)
+    end_date = _iso_date(end_date)
+    if start_date > end_date:
+        raise ValueError("start_date must not be after end_date")
+    if sort_order not in {"asc", "desc"}:
+        raise ValueError("sort_order must be asc or desc")
+    direction = "ASC" if sort_order == "asc" else "DESC"
+    initialize_database()
+    with _connect() as connection:
+        rows = connection.execute(
+            f"""SELECT memories.*,
+                       memory_date_mentions.original_expression AS mention_original_expression,
+                       memory_date_mentions.normalized_text AS mention_normalized_text,
+                       memory_date_mentions.start_date AS mention_start_date,
+                       memory_date_mentions.end_date AS mention_end_date,
+                       memory_date_mentions.timezone_name AS mention_timezone_name,
+                       memory_date_mentions.temporal_type AS mention_temporal_type,
+                       memory_date_mentions.confidence AS mention_confidence
+                FROM memories
+                JOIN memory_date_mentions
+                  ON memory_date_mentions.user_id = memories.user_id
+                 AND memory_date_mentions.memory_id = memories.id
+                WHERE memories.user_id = ?
+                  AND memory_date_mentions.start_date <= ?
+                  AND memory_date_mentions.end_date >= ?
+                ORDER BY memories.created_at {direction}, memories.id {direction},
+                         memory_date_mentions.id ASC""",
+            (user_id, end_date, start_date),
+        ).fetchall()
+    grouped: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        memory_id = int(row["id"])
+        if memory_id not in grouped:
+            grouped[memory_id] = {
+                key: row[key]
+                for key in ("id", "user_id", "content", "tags", "category", "created_at", "updated_at")
+            }
+            grouped[memory_id]["date_mentions"] = []
+        grouped[memory_id]["date_mentions"].append({
+            "original_expression": row["mention_original_expression"],
+            "normalized_text": row["mention_normalized_text"],
+            "start_date": row["mention_start_date"],
+            "end_date": row["mention_end_date"],
+            "timezone_name": row["mention_timezone_name"],
+            "temporal_type": row["mention_temporal_type"],
             "confidence": row["mention_confidence"],
         })
     return list(grouped.values())

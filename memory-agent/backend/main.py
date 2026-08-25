@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import os
 from calendar import monthrange
-from datetime import UTC, date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 import logging
 from pathlib import Path
 import sqlite3
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Callable, Literal
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, status
@@ -35,6 +35,7 @@ from database import (
     list_memories,
     list_memories_created_between,
     list_memories_mentioning_date,
+    list_memories_mentioning_range,
     list_messages,
     mark_memory_date_extraction,
     mark_embedding_result,
@@ -49,7 +50,15 @@ from llm_service import (
     generate_integrated_answer,
 )
 from memory_categories import MemoryCategory
-from vector_store import add_to_vector, delete_from_vector, rebuild_vector_store, search_similar
+from settings import APP_TIMEZONE, TIMEZONE_NAME
+from temporal_service import TemporalQueryError, resolve_query_window
+from vector_store import (
+    add_to_vector,
+    delete_from_vector,
+    rebuild_vector_store,
+    search_similar,
+    search_similar_within,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env", override=False)
@@ -72,8 +81,8 @@ application = CORSMiddleware(
 
 bearer = HTTPBearer(auto_error=False)
 MemorySortOrder = Literal["desc", "asc"]
-DEFAULT_TIMEZONE = "Asia/Shanghai"
-SHANGHAI_TIMEZONE = timezone(timedelta(hours=8), name=DEFAULT_TIMEZONE)
+DEFAULT_TIMEZONE = TIMEZONE_NAME
+SHANGHAI_TIMEZONE = APP_TIMEZONE
 logger = logging.getLogger(__name__)
 
 
@@ -201,7 +210,46 @@ def _store_memory(user_id: str, content: str, tags: list[str], category: str | N
     return {"success": True, "memory_id": memory_id, "message": "记忆已保存"}
 
 
-def _query_memory(user_id: str, query: str) -> dict[str, Any]:
+def _query_memory(
+    user_id: str, query: str, clock: Callable[[], datetime] | None = None
+) -> dict[str, Any]:
+    try:
+        temporal_filter = resolve_query_window(query, extract_date_mentions, clock=clock)
+    except TemporalQueryError as exc:
+        return {
+            "answer": "检测到时间条件，但未能可靠解析日期；未执行记忆检索。",
+            "source_memories": [],
+            "temporal_filter": {
+                "status": "failed",
+                "error": exc.code,
+                "timezone": DEFAULT_TIMEZONE,
+            },
+        }
+    if temporal_filter is not None:
+        source_memories = list_memories_mentioning_range(
+            user_id, temporal_filter["start_date"], temporal_filter["end_date"]
+        )
+        semantic_query = str(temporal_filter.get("semantic_query") or "").strip()
+        if semantic_query and source_memories:
+            by_id = {int(memory["id"]): memory for memory in source_memories}
+            ranked = search_similar_within(
+                user_id, semantic_query, list(by_id), top_k=len(by_id)
+            )
+            ranked_ids = [
+                int(match["memory_id"])
+                for match in ranked
+                if int(match["memory_id"]) in by_id
+            ]
+            ranked_set = set(ranked_ids)
+            source_memories = [by_id[memory_id] for memory_id in ranked_ids] + [
+                memory for memory_id, memory in by_id.items() if memory_id not in ranked_set
+            ]
+        answer = generate_integrated_answer(query, source_memories, temporal_filter)
+        return {
+            "answer": answer,
+            "source_memories": source_memories,
+            "temporal_filter": temporal_filter,
+        }
     semantic_matches = search_similar(user_id, query, top_k=5)
     keyword_matches = search_memories_by_keyword(user_id, query)
     source_memories: list[dict[str, Any]] = []
@@ -218,7 +266,7 @@ def _query_memory(user_id: str, query: str) -> dict[str, Any]:
             source_memories.append(memory)
             seen_ids.add(memory_id)
     answer = generate_integrated_answer(query, source_memories)
-    return {"answer": answer, "source_memories": source_memories}
+    return {"answer": answer, "source_memories": source_memories, "temporal_filter": None}
 
 
 @app.on_event("startup")
@@ -247,6 +295,7 @@ def api_health() -> dict[str, Any]:
         "application": APP_NAME,
         "version": APP_VERSION,
         "current_time": datetime.now(UTC).isoformat(),
+        "timezone": DEFAULT_TIMEZONE,
         "database_accessible": database_ok,
     }
 

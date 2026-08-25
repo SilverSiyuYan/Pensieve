@@ -176,6 +176,7 @@
         finally { clearTimeout(timer); }
       };
       const networkError = (error) => transportError(error, apiBaseUrl, window.location.origin, 2500);
+      let applicationTimezone = window.MEMORY_AGENT_CONFIG?.timezone || 'Asia/Shanghai';
       const verifyApiAvailability = async () => {
         if (apiResolutionError) throw apiResolutionError;
         const healthUrl = `${apiBaseUrl}/api/health`;
@@ -186,6 +187,7 @@
           throw networkError(error);
         }
         const health = validateHealthResponse(await parseJsonResponse(response));
+        applicationTimezone = health.timezone;
         return apiBaseUrl;
       };
       let apiReady = null;
@@ -206,12 +208,12 @@
       let calendarDayRequestId = 0;
       let selectedCalendarDate = '';
       let calendarMonthPayload = null;
-      const shanghaiToday = () => {
-        const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+      const applicationToday = () => {
+        const parts = new Intl.DateTimeFormat('en-US', { timeZone: applicationTimezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
         const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
         return `${values.year}-${values.month}-${values.day}`;
       };
-      const initialCalendarDate = shanghaiToday();
+      const initialCalendarDate = applicationToday();
       let calendarYear = Number(initialCalendarDate.slice(0, 4));
       let calendarMonth = Number(initialCalendarDate.slice(5, 7));
       const authPanel = document.querySelector('#auth-panel');
@@ -276,6 +278,7 @@
         authError.textContent = message; authError.hidden = !message;
       }
       function showApp(user) {
+        const today = applicationToday(); calendarYear = Number(today.slice(0, 4)); calendarMonth = Number(today.slice(5, 7));
         authPanel.hidden = true; viewNav.hidden = false; logoutButton.hidden = false; accountName.textContent = user.email;
         showMemoryView(); loadMemories(); userInput.focus();
       }
@@ -377,7 +380,7 @@
           }
           const day = payload.days[index - leadingBlanks];
           const cell = document.createElement('button'); cell.type = 'button'; cell.className = 'calendar-day'; cell.dataset.date = day.date;
-          if (day.date === shanghaiToday()) cell.classList.add('today');
+          if (day.date === applicationToday()) cell.classList.add('today');
           if (day.date === selectedCalendarDate) cell.classList.add('selected');
           cell.setAttribute('aria-label', `${day.date}，当天写入 ${day.created_count} 条，内容提及 ${day.mentioned_count} 条`);
           const number = document.createElement('span'); number.className = 'day-number'; number.textContent = String(Number(day.date.slice(8, 10)));
@@ -484,7 +487,7 @@
       calendarPrevious.addEventListener('click', () => shiftCalendarMonth(-1));
       calendarNext.addEventListener('click', () => shiftCalendarMonth(1));
       calendarToday.addEventListener('click', async () => {
-        const today = shanghaiToday(); calendarYear = Number(today.slice(0, 4)); calendarMonth = Number(today.slice(5, 7)); selectedCalendarDate = today;
+        const today = applicationToday(); calendarYear = Number(today.slice(0, 4)); calendarMonth = Number(today.slice(5, 7)); selectedCalendarDate = today;
         await loadCalendarMonth(); selectCalendarDay(today);
       });
       calendarSortOrder.addEventListener('change', () => { if (selectedCalendarDate) loadCalendarDay(selectedCalendarDate); });

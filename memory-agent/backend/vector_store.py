@@ -78,6 +78,36 @@ def search_similar(user_id: str, query: str, top_k: int = 5) -> list[dict[str, A
     ]
 
 
+def search_similar_within(
+    user_id: str, query: str, memory_ids: list[int], top_k: int | None = None
+) -> list[dict[str, Any]]:
+    """Rank only an already structurally filtered candidate set."""
+    unique_ids = list(dict.fromkeys(int(memory_id) for memory_id in memory_ids))
+    if not query.strip() or not unique_ids:
+        return []
+    limit = min(top_k or len(unique_ids), len(unique_ids))
+    collection = _get_collection()
+    if collection.count() == 0:
+        return []
+    result = collection.query(
+        query_texts=[query],
+        n_results=limit,
+        where={"$and": [{"user_id": user_id}, {"memory_id": {"$in": unique_ids}}]},
+        include=["documents", "metadatas", "distances"],
+    )
+    return [
+        {
+            "memory_id": metadata["memory_id"],
+            "content": document,
+            "distance_score": distance,
+            "metadata": metadata,
+        }
+        for document, metadata, distance in zip(
+            result["documents"][0], result["metadatas"][0], result["distances"][0]
+        )
+    ]
+
+
 def delete_from_vector(user_id: str, memory_id: int) -> None:
     """Remove the vector associated with a SQLite memory ID."""
     _get_collection().delete(ids=[_vector_id(user_id, memory_id)], where={"user_id": user_id})

@@ -21,7 +21,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(main, "classify_memory_category", lambda content: "todo")
     monkeypatch.setattr(main, "extract_date_mentions", lambda content, reference, timezone: [])
-    with TestClient(main.app) as test_client:
+    with TestClient(main.application) as test_client:
         yield test_client
 
 
@@ -38,6 +38,21 @@ def auth(token: str) -> dict[str, str]:
 def test_memory_routes_require_authentication(client: TestClient) -> None:
     assert client.get("/api/memories").status_code == 401
     assert client.post("/api/memory/store", json={"content": "secret"}).status_code == 401
+
+
+def test_health_reports_consistent_version_and_database_state(client: TestClient) -> None:
+    health = client.get("/api/health")
+    legacy_health = client.get("/health")
+
+    assert health.status_code == 200
+    assert legacy_health.status_code == 200
+    for key in ("status", "application", "version", "database_accessible"):
+        assert health.json()[key] == legacy_health.json()[key]
+    assert health.json()["status"] == "ok"
+    assert health.json()["application"] == main.app.title == "memory-agent"
+    assert health.json()["version"] == main.app.version
+    assert health.json()["database_accessible"] is True
+    assert health.json()["current_time"].endswith("+00:00")
 
 
 @pytest.mark.parametrize("origin", ["http://localhost:8080", "http://127.0.0.1:8080"])

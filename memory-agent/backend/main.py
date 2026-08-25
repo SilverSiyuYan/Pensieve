@@ -16,11 +16,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, field_validator
 
+from app_meta import APP_NAME, APP_VERSION
 from auth import authenticate_token, hash_password, issue_session, logout_token, verify_password
 from database import (
+    DATABASE_PATH,
     add_memory,
     add_message,
     create_user,
+    database_is_accessible,
     delete_memory,
     get_memory,
     get_calendar_month_counts,
@@ -50,7 +53,7 @@ from vector_store import add_to_vector, delete_from_vector, rebuild_vector_store
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env", override=False)
 
-app = FastAPI(title="memory-agent", version="0.2.0")
+app = FastAPI(title=APP_NAME, version=APP_VERSION)
 allowed_origins = [
     origin.strip()
     for origin in os.getenv(
@@ -58,11 +61,11 @@ allowed_origins = [
     ).split(",")
     if origin.strip()
 ]
-app.add_middleware(
-    CORSMiddleware,
+application = CORSMiddleware(
+    app=app,
     allow_origins=allowed_origins,
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -220,11 +223,31 @@ def _query_memory(user_id: str, query: str) -> dict[str, Any]:
 @app.on_event("startup")
 def startup() -> None:
     initialize_database()
+    logging.getLogger("uvicorn.error").info(
+        "Application startup: version=%s listen=%s allowed_origins=%s database=%s",
+        APP_VERSION,
+        os.getenv("MEMORY_AGENT_LISTEN_ADDRESS", "configured by Uvicorn; see server startup log"),
+        ",".join(allowed_origins),
+        DATABASE_PATH.resolve(),
+    )
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, Any]:
+    """Compatibility alias for load balancers and existing deployments."""
+    return api_health()
+
+
+@app.get("/api/health")
+def api_health() -> dict[str, Any]:
+    database_ok = database_is_accessible()
+    return {
+        "status": "ok" if database_ok else "degraded",
+        "application": APP_NAME,
+        "version": APP_VERSION,
+        "current_time": datetime.now(UTC).isoformat(),
+        "database_accessible": database_ok,
+    }
 
 
 @app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)

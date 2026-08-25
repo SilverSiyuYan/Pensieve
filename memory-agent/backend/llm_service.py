@@ -15,7 +15,7 @@ from openai import OpenAI
 from memory_categories import CATEGORY_SYSTEM_PROMPT, DEFAULT_MEMORY_CATEGORY, MemoryCategory
 
 
-load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
+load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
 SYSTEM_PROMPT = """你是一个记忆助手。用户会询问他们之前记录的事情。
 请根据提供的记忆条目，用自然语言整合回答用户的问题。

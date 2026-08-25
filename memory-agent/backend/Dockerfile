@@ -10,7 +10,7 @@ COPY requirements.txt ./
 RUN python -m pip install --upgrade pip && \
     pip install -r requirements.txt
 
-COPY main.py auth.py database.py vector_store.py llm_service.py ./
+COPY main.py app_meta.py auth.py database.py vector_store.py llm_service.py memory_categories.py ./
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # Keep mutable state outside the application code. The existing application
@@ -28,4 +28,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 
 # SQLite and local ChromaDB are intentionally run as one application worker.
 ENTRYPOINT ["docker-entrypoint.sh"]
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers"]
+CMD ["uvicorn", "main:application", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers"]

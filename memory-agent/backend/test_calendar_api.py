@@ -12,7 +12,7 @@ import main
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(database, "DATABASE_PATH", tmp_path / "memory.db")
-    with TestClient(main.app) as test_client:
+    with TestClient(main.application) as test_client:
         yield test_client
 
 

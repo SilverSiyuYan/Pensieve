@@ -4,6 +4,9 @@ from pathlib import Path
 
 
 HTML = (Path(__file__).resolve().parents[1] / "frontend" / "index.html").read_text(encoding="utf-8")
+API_RUNTIME = (Path(__file__).resolve().parents[1] / "frontend" / "api-runtime.js").read_text(
+    encoding="utf-8"
+)
 
 
 def test_memory_filter_and_sort_controls_have_expected_defaults() -> None:
@@ -26,8 +29,26 @@ def test_frontend_sends_filter_and_sort_parameters() -> None:
 
 
 def test_network_failures_show_actionable_backend_error() -> None:
-    assert "无法连接后端服务" in HTML
-    assert "请确认服务已启动且 API 地址正确" in HTML
+    assert "无法连接后端服务" in API_RUNTIME
+    assert "resolveApiBase" in HTML
+    assert "fetchWithTimeout" in HTML
+    assert "请求超时" in API_RUNTIME
+    assert "网络拒绝、CORS 或浏览器安全策略" in API_RUNTIME
+    assert 'mode: \'no-cors\'' not in HTML
+    assert "登录失效或尚未登录" in API_RUNTIME
+    assert "无权限执行此操作" in API_RUNTIME
+    assert "前后端版本不匹配" in API_RUNTIME
+    assert "后端内部错误" in API_RUNTIME
+    assert "后端响应格式异常" in API_RUNTIME
+
+
+def test_api_base_has_one_explicit_priority_and_is_normalised() -> None:
+    assert '<script src="config.js?v=0.2.0-cors-fix"></script>' in HTML
+    assert '<script src="api-runtime.js?v=0.2.0-cors-fix"></script>' in HTML
+    assert "resolveConfiguredApiBase(window.location.href, projectApiBase)" in HTML
+    assert "const verifyApiAvailability = async () =>" in HTML
+    assert "memory-agent-api-base" not in HTML
+    assert "apiCandidates" not in HTML
 
 
 def test_category_labels_empty_error_and_narrow_layout_are_present() -> None:

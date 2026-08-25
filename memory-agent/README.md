@@ -55,83 +55,101 @@ docker compose ps
 
 数据保存在名为 `memory_data` 的 Docker volume 中。升级时不要使用 `docker compose down -v`，否则会删除该数据卷。
 
-## 本地运行：不使用 Docker
+## Windows 本地开发
 
-要求 Python 3.11 或 3.12。前端不需要 Node.js，也没有 npm 构建步骤。
+要求 Python 3.11 或 3.12。前端是纯 HTML/JavaScript，不需要 Node.js。为避免从错误目录
+加载同名模块、遗留旧 Uvicorn 或让前端连到错误实例，Windows 开发只使用以下脚本，不再分别
+手动运行 Uvicorn 和 `http.server`。
 
-```bash
-cd memory-agent/backend
-python -m venv .venv
-```
+### 首次准备
 
-Linux/macOS：
-
-```bash
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-python init_db.py
-uvicorn main:app --host 127.0.0.1 --port 8001
-```
-
-Windows PowerShell：
+在 `memory-agent` 目录执行：
 
 ```powershell
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-Copy-Item .env.example .env
-python init_db.py
-python -m uvicorn main:app --host 127.0.0.1 --port 8001 --reload
+python -m venv .\backend\.venv
+.\backend\.venv\Scripts\python.exe -m pip install -r .\backend\requirements.txt
+Copy-Item .\backend\.env.example .\backend\.env  # 仅在 .env 尚不存在时执行
+# 编辑 backend\.env，配置 OPENAI_API_KEY 等变量
+.\backend\.venv\Scripts\python.exe .\backend\init_db.py  # 仅在 memory.db 不存在时执行
 ```
 
-### 开发服务启动核对
+不要覆盖已有 `.env` 或 `memory.db`。
 
-必须先进入 `memory-agent/backend` 再启动。`main:app` 是按当前工作目录导入的；从其他目录启动可能加载另一个同名模块或旧代码。
+### 标准启动
 
-Windows PowerShell 启动前可检查 8001 是否被旧进程占用：
+从项目根目录 `memory-agent` 运行：
 
 ```powershell
-netstat -ano | Select-String ':8001'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-dev.ps1
 ```
 
-如果显示 `LISTENING`，先确认 PID 对应的是本项目旧 Uvicorn，再停止它：
+`-ExecutionPolicy Bypass` 只作用于本次新 PowerShell 进程，不会永久降低系统执行策略，也不需要
+运行 `Set-ExecutionPolicy Unrestricted`。如果当前终端已允许执行本地脚本，也可直接运行：
 
 ```powershell
-Get-Process -Id <PID> | Select-Object Id,ProcessName,Path,StartTime
-Stop-Process -Id <PID>
+.\scripts\start-dev.ps1
 ```
 
-不要在未确认进程身份时批量终止所有 Python 进程。启动后必须验证实际加载版本，而不只是确认端口已监听：
+脚本固定检查 8001 和 8080，不会自动换端口或结束占用者。启动成功后会打印最终 API Base、
+前端 URL、后端版本、实际加载模块、数据库绝对路径和 PID。浏览器必须使用脚本打印的 URL，
+不要直接双击 `frontend/index.html`。
+
+日志写入 `logs/dev/`，PID 与启动身份记录写入 `.dev-runtime/dev-state.json`；两者均被 Git 忽略。
+
+### 标准停止
 
 ```powershell
-$schema = Invoke-RestMethod http://127.0.0.1:8001/openapi.json
-$schema.info.version
-$schema.paths.PSObject.Properties.Name
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-dev.ps1
 ```
 
-当前多用户版本应返回 `0.2.0`，并包含：
+停止脚本会同时核对 PID 和进程启动时间，只停止 `start-dev.ps1` 本次记录的前后端进程。它不会
+按进程名称批量停止 Python、Node 或 Uvicorn。
 
-```text
-/api/auth/register
-/api/auth/login
-/api/auth/logout
+### 一键诊断
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\diagnose-dev.ps1
 ```
 
-开发环境使用 `--reload` 可以在源码变化后自动重载。生产环境禁止使用 `--reload`，应重新构建并替换容器：
+诊断输出包括端口与进程身份、健康检查、实际后端版本、Python/Node 版本、虚拟环境、数据库、
+API Base、状态文件及最新日志位置。
 
-```bash
-docker compose down
-docker compose build --no-cache
-docker compose up -d
+需要单独验证实际服务的 CORS 预检和响应头时运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-cors.ps1
+# 也可验证 localhost 来源：
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-cors.ps1 -Origin http://localhost:8080
 ```
 
-另开终端，在项目根目录启动静态页面：
+脚本会输出 8001 监听进程、后端版本、OPTIONS 预检以及带 Origin 的真实 GET 响应头；验证失败时返回非零退出码。
 
-```bash
-python -m http.server 8080 --directory frontend
+### 重复启动冒烟测试
+
+发布本地启动脚本修改前，可执行五轮真实启动、健康检查与停止：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-dev.ps1 -Cycles 5
 ```
 
-本地页面与 API 不同源时，可用 `http://localhost:8080/?apiBase=http://localhost:8001` 访问。
+冒烟脚本会从系统临时目录调用项目脚本，逐轮核对 IPv4、`localhost`、OpenAPI 版本、数据库
+绝对路径、端口和状态文件，并确认数据库 SHA-256 未改变。
+
+### 常见故障
+
+- **提示虚拟环境不存在**：执行“首次准备”中的 venv 和依赖安装命令，不要让项目隐式使用系统 Python。
+- **提示 8001 或 8080 被占用**：先查看脚本输出的 PID、完整命令行及
+  `LooksLikeCurrentProject`。若它是状态文件记录的本项目实例，运行 `stop-dev.ps1`；否则从占用它的
+  应用中停止。不要批量结束所有 Python 进程。
+- **后端启动后立即退出**：`start-dev.ps1` 会直接显示后端错误，同时保留
+  `logs/dev/backend-*.error.log`。先修复日志中的导入、依赖、环境变量或数据库权限错误。
+- **遗留 PID 文件**：下次启动会校验 PID 与启动时间；两端进程都不存在时会自动移除过期状态。
+- **前端提示版本不匹配**：运行 `diagnose-dev.ps1`，确认 `/api/health` 的版本、PID 和命令行都来自
+  当前项目。
+- **需要自定义 API Base**：启动前设置 `$env:MEMORY_AGENT_API_BASE`，或向脚本传递 `-ApiBase`。
+  地址仍必须是明确的本机 HTTP 根地址，脚本不会扫描或选择其他端口。
+
+`scripts/start-local.ps1` 仅保留为旧命令兼容别名，新文档和日常开发统一使用 `start-dev.ps1`。
 
 ## 测试
 

@@ -92,7 +92,7 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 cp .env.example .env
-uvicorn main:app --host 127.0.0.1 --port 8001 --workers 1
+uvicorn main:application --host 127.0.0.1 --port 8001 --workers 1
 ```
 
 前端可交给现有 Nginx 静态托管，将 `/api/` 和 `/health` 反向代理到 `127.0.0.1:8001`。示例配置见 `frontend/nginx.conf`。

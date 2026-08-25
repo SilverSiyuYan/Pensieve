@@ -106,6 +106,15 @@ def _connect() -> sqlite3.Connection:
     return connection
 
 
+def database_is_accessible() -> bool:
+    """Check SQLite availability without exposing or changing user data."""
+    try:
+        with _connect() as connection:
+            return connection.execute("SELECT 1").fetchone()[0] == 1
+    except (OSError, sqlite3.Error):
+        return False
+
+
 def _as_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row is not None else None
 

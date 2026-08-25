@@ -155,11 +155,50 @@
         </aside>
       </section>
     </main>
+    <script src="config.js?v=0.2.0-cors-fix"></script>
+    <script src="api-runtime.js?v=0.2.0-cors-fix"></script>
     <script>
-      // 可通过 ?apiBase=http://localhost:8001 或 localStorage 的 memory-agent-api-base 覆盖地址。
-      const configuredBase = new URLSearchParams(window.location.search).get('apiBase') || localStorage.getItem('memory-agent-api-base');
-      const currentOrigin = window.location.protocol.startsWith('http') ? window.location.origin : 'http://localhost:8001';
-      const API_BASE_URL = (configuredBase || currentOrigin).replace(/\/$/, '');
+      const { ApiError, resolveApiBase: resolveConfiguredApiBase, transportError, parseJsonResponse, validateHealthResponse } = window.MemoryAgentApi;
+      // 唯一优先级：?apiBase → 项目 config.js → 同源默认地址。
+      const projectApiBase = window.MEMORY_AGENT_CONFIG?.apiBase;
+      let apiBaseUrl;
+      let apiResolutionError = null;
+      try { apiBaseUrl = resolveConfiguredApiBase(window.location.href, projectApiBase); }
+      catch (error) { apiResolutionError = error; }
+      const fetchWithTimeout = async (url, options = {}, timeoutMs = 10000) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try { return await fetch(url, { ...options, signal: controller.signal }); }
+        catch (error) {
+          if (error.name === 'AbortError') throw new ApiError('timeout', `请求超时（${timeoutMs / 1000} 秒）：${url}`);
+          throw error;
+        }
+        finally { clearTimeout(timer); }
+      };
+      const networkError = (error) => transportError(error, apiBaseUrl, window.location.origin, 2500);
+      const verifyApiAvailability = async () => {
+        if (apiResolutionError) throw apiResolutionError;
+        const healthUrl = `${apiBaseUrl}/api/health`;
+        let response;
+        try { response = await fetchWithTimeout(healthUrl, { cache: 'no-store' }, 2500); }
+        catch (error) {
+          if (error instanceof ApiError) throw error;
+          throw networkError(error);
+        }
+        const health = validateHealthResponse(await parseJsonResponse(response));
+        return apiBaseUrl;
+      };
+      let apiReady = null;
+      const ensureApiReady = async () => {
+        if (!apiReady) apiReady = verifyApiAvailability();
+        try { return await apiReady; }
+        catch (error) {
+          // Network availability can change after the page is loaded. Do not
+          // make a transient startup failure permanent for this browser tab.
+          apiReady = null;
+          throw error;
+        }
+      };
       let accessToken = localStorage.getItem('memory-agent-access-token') || '';
       let currentConversationId = null;
       let memoryRequestId = 0;
@@ -216,16 +255,20 @@
       function showError(message) { chatError.textContent = message; chatError.hidden = false; }
       function clearError() { chatError.hidden = true; chatError.textContent = ''; }
       async function request(path, options = {}) {
+        await ensureApiReady();
+        if (apiResolutionError) throw apiResolutionError;
         const headers = new Headers(options.headers || {});
         if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
         options.headers = headers;
         let response;
-        try { response = await fetch(`${API_BASE_URL}${path}`, options); }
-        catch { throw new Error(`无法连接后端服务（${API_BASE_URL}），请确认服务已启动且 API 地址正确。`); }
-        let data; try { data = await response.json(); } catch { data = {}; }
+        const requestUrl = `${apiBaseUrl}${path}`;
+        try { response = await fetchWithTimeout(requestUrl, options); }
+        catch (error) {
+          if (error instanceof ApiError) throw error;
+          throw networkError(error);
+        }
         if (response.status === 401 && !path.startsWith('/api/auth/')) showAuth();
-        if (!response.ok) throw new Error(data.detail || '请求失败，请稍后重试。');
-        return data;
+        return parseJsonResponse(response);
       }
       function showAuth(message = '') {
         accessToken = ''; currentConversationId = null; localStorage.removeItem('memory-agent-access-token');

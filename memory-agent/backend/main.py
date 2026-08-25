@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from openai import APITimeoutError
 from pydantic import BaseModel, Field, field_validator
 
 from app_meta import APP_NAME, APP_VERSION
@@ -296,6 +297,13 @@ def query_memory(payload: MemoryQueryRequest, current_user: CurrentUser) -> dict
 @app.post("/api/memory/auto")
 def auto_memory(payload: AutoMemoryRequest, current_user: CurrentUser) -> dict[str, Any]:
     user_id = str(current_user["id"])
+    try:
+        return _run_auto_memory(user_id, payload)
+    except APITimeoutError:
+        raise HTTPException(status_code=504, detail="Model service timed out") from None
+
+
+def _run_auto_memory(user_id: str, payload: AutoMemoryRequest) -> dict[str, Any]:
     try:
         conversation_id = get_or_create_conversation(user_id, payload.conversation_id)
     except ValueError:

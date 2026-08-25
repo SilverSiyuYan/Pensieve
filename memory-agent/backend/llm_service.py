@@ -59,6 +59,8 @@ def _get_client() -> OpenAI:
         _client = OpenAI(
             api_key=api_key,
             base_url=base_url,
+            timeout=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "30")),
+            max_retries=int(os.getenv("OPENAI_MAX_RETRIES", "0")),
         )
     return _client
 

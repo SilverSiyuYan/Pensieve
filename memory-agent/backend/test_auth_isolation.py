@@ -3,6 +3,8 @@
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import httpx
+from openai import APITimeoutError
 import pytest
 
 import database
@@ -149,6 +151,28 @@ def test_conversation_history_is_isolated(client: TestClient, monkeypatch: pytes
     assert len(client.get(f"/api/conversations/{conversation_id}/messages", headers=auth(token_a)).json()) == 2
     assert client.get(f"/api/conversations/{conversation_id}/messages", headers=auth(token_b)).status_code == 404
     assert client.get("/api/conversations", headers=auth(token_b)).json() == []
+
+
+def test_auto_memory_reports_model_timeout_as_cors_visible_504(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    token = register(client, "timeout@example.com")
+
+    def time_out(value: str):
+        del value
+        raise APITimeoutError(request=httpx.Request("POST", "https://model.invalid/chat"))
+
+    monkeypatch.setattr(main, "classify_intent", time_out)
+    origin = "http://127.0.0.1:8080"
+    response = client.post(
+        "/api/memory/auto",
+        headers={**auth(token), "Origin": origin},
+        json={"input": "测试模型超时"},
+    )
+
+    assert response.status_code == 504
+    assert response.json() == {"detail": "Model service timed out"}
+    assert response.headers["access-control-allow-origin"] == origin
 
 
 def test_classification_failure_still_saves_unmodified_memory(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

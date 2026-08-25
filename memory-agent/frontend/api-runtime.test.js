@@ -13,7 +13,7 @@ assert.throws(() => normaliseApiBase('ftp://localhost:8001', 'http://localhost:8
 assert.throws(() => normaliseApiBase('http://localhost:8001/wrong', 'http://localhost:8080/'), /根地址/);
 assert.throws(() => normaliseApiBase('', 'file:///index.html'), /不能直接从文件打开/);
 
-for (const [status, kind] of [[401, 'auth'], [403, 'forbidden'], [404, 'not-found'], [500, 'server']]) {
+for (const [status, kind] of [[401, 'auth'], [403, 'forbidden'], [404, 'not-found'], [500, 'server'], [504, 'upstream-timeout']]) {
   const error = statusError(status);
   assert.equal(error.kind, kind);
   assert.equal(error.status, status);

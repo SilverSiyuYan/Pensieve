@@ -35,6 +35,7 @@
     if (status === 401) return new ApiError('auth', `登录失效或尚未登录${suffix}`, 401);
     if (status === 403) return new ApiError('forbidden', `无权限执行此操作${suffix}`, 403);
     if (status === 404) return new ApiError('not-found', `接口不存在，可能是前后端版本不匹配${suffix}`, 404);
+    if (status === 504) return new ApiError('upstream-timeout', `模型服务响应超时${suffix}`, 504);
     if (status >= 500) return new ApiError('server', `后端内部错误（HTTP ${status}）${suffix}`, status);
     return new ApiError('http', detail || `请求失败（HTTP ${status}）`, status);
   }

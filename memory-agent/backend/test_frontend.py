@@ -39,12 +39,19 @@ def test_network_failures_show_actionable_backend_error() -> None:
     assert "无权限执行此操作" in API_RUNTIME
     assert "前后端版本不匹配" in API_RUNTIME
     assert "后端内部错误" in API_RUNTIME
+    assert "模型服务响应超时" in API_RUNTIME
     assert "后端响应格式异常" in API_RUNTIME
 
 
+def test_long_running_memory_request_has_a_dedicated_timeout() -> None:
+    assert "async function request(path, options = {}, timeoutMs = 10000)" in HTML
+    assert "fetchWithTimeout(requestUrl, options, timeoutMs)" in HTML
+    assert "}, 120000);" in HTML
+
+
 def test_api_base_has_one_explicit_priority_and_is_normalised() -> None:
-    assert '<script src="config.js?v=0.2.0-cors-fix"></script>' in HTML
-    assert '<script src="api-runtime.js?v=0.2.0-cors-fix"></script>' in HTML
+    assert '<script src="config.js?v=0.2.0-timeout-fix"></script>' in HTML
+    assert '<script src="api-runtime.js?v=0.2.0-timeout-fix"></script>' in HTML
     assert "resolveConfiguredApiBase(window.location.href, projectApiBase)" in HTML
     assert "const verifyApiAvailability = async () =>" in HTML
     assert "memory-agent-api-base" not in HTML

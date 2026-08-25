@@ -155,8 +155,8 @@
         </aside>
       </section>
     </main>
-    <script src="config.js?v=0.2.0-cors-fix"></script>
-    <script src="api-runtime.js?v=0.2.0-cors-fix"></script>
+    <script src="config.js?v=0.2.0-timeout-fix"></script>
+    <script src="api-runtime.js?v=0.2.0-timeout-fix"></script>
     <script>
       const { ApiError, resolveApiBase: resolveConfiguredApiBase, transportError, parseJsonResponse, validateHealthResponse } = window.MemoryAgentApi;
       // 唯一优先级：?apiBase → 项目 config.js → 同源默认地址。
@@ -254,7 +254,7 @@
       const scrollChatToBottom = () => { chatHistory.scrollTop = chatHistory.scrollHeight; };
       function showError(message) { chatError.textContent = message; chatError.hidden = false; }
       function clearError() { chatError.hidden = true; chatError.textContent = ''; }
-      async function request(path, options = {}) {
+      async function request(path, options = {}, timeoutMs = 10000) {
         await ensureApiReady();
         if (apiResolutionError) throw apiResolutionError;
         const headers = new Headers(options.headers || {});
@@ -262,7 +262,7 @@
         options.headers = headers;
         let response;
         const requestUrl = `${apiBaseUrl}${path}`;
-        try { response = await fetchWithTimeout(requestUrl, options); }
+        try { response = await fetchWithTimeout(requestUrl, options, timeoutMs); }
         catch (error) {
           if (error instanceof ApiError) throw error;
           throw networkError(error);
@@ -459,7 +459,7 @@
         try {
           const result = await request('/api/memory/auto', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input, conversation_id: currentConversationId }),
-          });
+          }, 120000);
           currentConversationId = result.conversation_id || currentConversationId;
           if (result.success && result.memory_id) {
             addMessage('assistant', `已记住：${input}`); await loadMemories();

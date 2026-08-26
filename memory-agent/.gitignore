@@ -19,6 +19,7 @@ data/
 *.log
 logs/
 .dev-runtime/
+runtime/
 
 # Python artifacts
 __pycache__/

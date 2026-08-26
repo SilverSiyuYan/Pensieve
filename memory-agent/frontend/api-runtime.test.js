@@ -1,9 +1,16 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
 require('./api-runtime.js');
 
 const { normaliseApiBase, resolveApiBase, statusError, transportError, parseJsonResponse, validateHealthResponse } = globalThis.MemoryAgentApi;
+
+const configSandbox = { window: {} };
+vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'config.js'), 'utf8'), configSandbox);
+assert.equal(configSandbox.window.MEMORY_AGENT_CONFIG.apiBase, 'http://127.0.0.1:8001');
 
 assert.equal(resolveApiBase('http://127.0.0.1:8080/', 'http://localhost:8001'), 'http://localhost:8001');
 assert.equal(resolveApiBase('http://127.0.0.1:8080/?apiBase=http://127.0.0.1:9000/api/', 'http://localhost:8001'), 'http://127.0.0.1:9000');

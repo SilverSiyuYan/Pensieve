@@ -1,7 +1,7 @@
-// Project runtime configuration. Deployments may replace this value before index.html loads.
+// Windows/local static-server defaults. Deployments may replace this file.
 window.MEMORY_AGENT_CONFIG = Object.freeze({
-  // Empty means the same origin (the Docker/Nginx deployment default).
-  apiBase: '',
+  // ?apiBase=... still takes precedence in api-runtime.js.
+  apiBase: 'http://127.0.0.1:8001',
   // Must match backend APP_TIMEZONE; the health response remains authoritative.
   timezone: 'Asia/Shanghai',
 });

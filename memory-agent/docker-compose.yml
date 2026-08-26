@@ -26,7 +26,7 @@ services:
         condition: service_healthy
     volumes:
       - ./frontend/index.html:/usr/share/nginx/html/index.html:ro
-      - ./frontend/config.js:/usr/share/nginx/html/config.js:ro
+      - ./frontend/config.docker.js:/usr/share/nginx/html/config.js:ro
       - ./frontend/api-runtime.js:/usr/share/nginx/html/api-runtime.js:ro
       - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:

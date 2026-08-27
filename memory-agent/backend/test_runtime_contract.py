@@ -18,6 +18,7 @@ EXPECTED_API_PATHS = {
     "/api/memory/query",
     "/api/memory/auto",
     "/api/memories",
+    "/api/memories/{memory_id}/inspiration-rendering",
     "/api/calendar/month",
     "/api/calendar/day",
     "/api/conversations",

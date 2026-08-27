@@ -6,7 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 require('./api-runtime.js');
 
-const { normaliseApiBase, resolveApiBase, statusError, transportError, parseJsonResponse, validateHealthResponse } = globalThis.MemoryAgentApi;
+const { normaliseApiBase, resolveApiBase, statusError, transportError, parseJsonResponse, validateHealthResponse, createAutoMemoryPayload } = globalThis.MemoryAgentApi;
 
 const configSandbox = { window: {} };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'config.js'), 'utf8'), configSandbox);
@@ -19,6 +19,10 @@ assert.equal(normaliseApiBase('http://localhost:8001////', 'http://localhost:808
 assert.throws(() => normaliseApiBase('ftp://localhost:8001', 'http://localhost:8080/'), /http/);
 assert.throws(() => normaliseApiBase('http://localhost:8001/wrong', 'http://localhost:8080/'), /根地址/);
 assert.throws(() => normaliseApiBase('', 'file:///index.html'), /不能直接从文件打开/);
+
+assert.deepEqual(createAutoMemoryPayload('灵感', null, true), { input: '灵感', conversation_id: null, inspiration_rendering: true });
+assert.deepEqual(createAutoMemoryPayload('普通记忆', 'conversation-1', false), { input: '普通记忆', conversation_id: 'conversation-1' });
+assert.deepEqual(createAutoMemoryPayload('字符串开关', null, 'true'), { input: '字符串开关', conversation_id: null });
 
 for (const [status, kind] of [[401, 'auth'], [403, 'forbidden'], [404, 'not-found'], [500, 'server'], [504, 'upstream-timeout']]) {
   const error = statusError(status);
@@ -51,8 +55,8 @@ assert.throws(() => validateHealthResponse({ application: 'memory-agent', versio
   await assert.rejects(() => parseJsonResponse(forbidden), (error) => error.kind === 'forbidden');
   const missing = { ok: false, status: 404, headers: { get: () => 'application/json' }, json: async () => ({ detail: 'missing' }) };
   await assert.rejects(() => parseJsonResponse(missing), (error) => error.kind === 'not-found');
-  const serverError = { ok: false, status: 500, headers: { get: () => 'application/json' }, json: async () => ({ detail: 'boom' }) };
-  await assert.rejects(() => parseJsonResponse(serverError), (error) => error.kind === 'server');
+  const serverError = { ok: false, status: 500, headers: { get: () => 'application/json' }, json: async () => ({ detail: 'Traceback: secret-token' }) };
+  await assert.rejects(() => parseJsonResponse(serverError), (error) => error.kind === 'server' && !/Traceback|secret-token|后端内部错误/.test(error.message));
   assert.equal(new Set([refused.kind, browserUnreadable.kind, timeout.kind, 'auth', 'forbidden', 'not-found', 'server', 'response-format', 'version']).size, 9);
   console.log('frontend API runtime smoke tests passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

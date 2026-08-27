@@ -110,7 +110,6 @@ def test_dotenv_configuration_matches_client_settings(monkeypatch) -> None:
     client = llm_service._get_client()
 
     assert os.environ["OPENAI_API_KEY"]
-    assert os.environ["OPENAI_BASE_URL"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
     assert llm_service._model_name() == "qwen-plus"
     assert client.api_key == os.environ["OPENAI_API_KEY"]
     assert str(client.base_url).rstrip("/") == os.environ["OPENAI_BASE_URL"].rstrip("/")

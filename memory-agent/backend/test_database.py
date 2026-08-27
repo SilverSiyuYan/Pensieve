@@ -1,10 +1,36 @@
 """Tests for the SQLite memory persistence layer."""
 
 from pathlib import Path
+import sqlite3
 
 import pytest
 
 import database
+
+
+class _ReadOnlyConnection:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def execute(self, statement: str):
+        if statement == "SELECT 1":
+            return self
+        raise sqlite3.OperationalError("attempt to write a readonly database")
+
+    def fetchone(self):
+        return (1,)
+
+    def rollback(self):
+        return None
+
+
+def test_database_health_rejects_read_only_connection(monkeypatch) -> None:
+    monkeypatch.setattr(database, "_connect", lambda: _ReadOnlyConnection())
+
+    assert database.database_is_accessible() is False
 
 
 def create_test_user() -> str:

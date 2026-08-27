@@ -58,6 +58,38 @@ CREATE_MEMORY_DATE_EXTRACTIONS_SQL = """CREATE TABLE IF NOT EXISTS memory_date_e
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id, memory_id) REFERENCES memories(user_id, id) ON DELETE CASCADE)"""
 
+CREATE_MEMORY_INSPIRATION_RENDERINGS_SQL = """CREATE TABLE IF NOT EXISTS memory_inspiration_renderings (
+    memory_id INTEGER PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    rendering_status TEXT NOT NULL
+        CHECK(rendering_status IN ('skipped_not_inspiration', 'pending', 'succeeded', 'partial', 'failed')),
+    search_query TEXT,
+    provider TEXT,
+    requested_count INTEGER NOT NULL DEFAULT 5 CHECK(requested_count > 0),
+    result_count INTEGER NOT NULL DEFAULT 0 CHECK(result_count >= 0),
+    error_code TEXT,
+    error_message TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+    generated_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id, memory_id) REFERENCES memories(user_id, id) ON DELETE CASCADE)"""
+
+CREATE_INSPIRATION_RENDERING_RESULTS_SQL = """CREATE TABLE IF NOT EXISTS inspiration_rendering_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    memory_id INTEGER NOT NULL,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    url TEXT NOT NULL,
+    source_domain TEXT NOT NULL,
+    rank INTEGER NOT NULL CHECK(rank > 0),
+    generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id, memory_id)
+        REFERENCES memory_inspiration_renderings(user_id, memory_id) ON DELETE CASCADE,
+    UNIQUE(user_id, memory_id, rank),
+    UNIQUE(user_id, memory_id, url))"""
+
 SCHEMA_SQL = [
     CREATE_USERS_SQL,
     """CREATE TABLE IF NOT EXISTS sessions (
@@ -87,6 +119,8 @@ SCHEMA_SQL = [
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_user_id_id ON memories(user_id, id)",
     CREATE_MEMORY_DATE_MENTIONS_SQL,
     CREATE_MEMORY_DATE_EXTRACTIONS_SQL,
+    CREATE_MEMORY_INSPIRATION_RENDERINGS_SQL,
+    CREATE_INSPIRATION_RENDERING_RESULTS_SQL,
     "CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash)",
     "CREATE INDEX IF NOT EXISTS idx_memories_user_created ON memories(user_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_memories_user_category ON memories(user_id, category)",
@@ -99,6 +133,9 @@ SCHEMA_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_memory_date_mentions_end_date ON memory_date_mentions(end_date)",
     "CREATE INDEX IF NOT EXISTS idx_memory_date_extractions_status ON memory_date_extractions(status, memory_id)",
     "CREATE INDEX IF NOT EXISTS idx_memory_date_extractions_user_status ON memory_date_extractions(user_id, status, memory_id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_renderings_user_memory ON memory_inspiration_renderings(user_id, memory_id)",
+    "CREATE INDEX IF NOT EXISTS idx_memory_renderings_user_status ON memory_inspiration_renderings(user_id, rendering_status, memory_id)",
+    "CREATE INDEX IF NOT EXISTS idx_rendering_results_user_memory_rank ON inspiration_rendering_results(user_id, memory_id, rank)",
 ]
 
 
@@ -110,11 +147,20 @@ def _connect() -> sqlite3.Connection:
     return connection
 
 
+def _verify_database_writable(connection: sqlite3.Connection) -> None:
+    """Acquire and release a main-database write transaction without changing data."""
+    connection.execute("BEGIN IMMEDIATE")
+    connection.rollback()
+
+
 def database_is_accessible() -> bool:
-    """Check SQLite availability without exposing or changing user data."""
+    """Check that SQLite can both read and accept writes without changing user data."""
     try:
         with _connect() as connection:
-            return connection.execute("SELECT 1").fetchone()[0] == 1
+            if connection.execute("SELECT 1").fetchone()[0] != 1:
+                return False
+            _verify_database_writable(connection)
+            return True
     except (OSError, sqlite3.Error):
         return False
 
@@ -214,6 +260,7 @@ def initialize_database() -> None:
                 "UPDATE memory_date_mentions SET temporal_type = 'date_range' WHERE start_date <> end_date"
             )
         connection.commit()
+        _verify_database_writable(connection)
     finally:
         connection.close()
 
@@ -764,6 +811,120 @@ def mark_embedding_result(user_id: str, memory_id: int, error: str | None = None
                updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND memory_id = ? AND status = 'pending'""",
             (task_status, error, user_id, memory_id),
         )
+
+
+def create_inspiration_rendering(
+    user_id: str,
+    memory_id: int,
+    rendering_status: str,
+    search_query: str | None = None,
+    provider: str | None = None,
+    requested_count: int = 5,
+) -> None:
+    """Create or reset one rendering owned by the same user as its memory."""
+    if rendering_status not in {"skipped_not_inspiration", "pending"}:
+        raise ValueError("Invalid initial rendering status")
+    initialize_database()
+    with _connect() as connection:
+        owner = connection.execute(
+            "SELECT 1 FROM memories WHERE user_id = ? AND id = ?", (user_id, memory_id)
+        ).fetchone()
+        if owner is None:
+            raise ValueError("Memory not found")
+        connection.execute(
+            """INSERT INTO memory_inspiration_renderings (
+                   memory_id, user_id, rendering_status, search_query, provider,
+                   requested_count, result_count, error_code, error_message, attempts
+               ) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, 0)
+               ON CONFLICT(memory_id) DO UPDATE SET
+                   user_id = excluded.user_id,
+                   rendering_status = excluded.rendering_status,
+                   search_query = excluded.search_query,
+                   provider = excluded.provider,
+                   requested_count = excluded.requested_count,
+                   result_count = 0,
+                   error_code = NULL,
+                   error_message = NULL,
+                   attempts = 0,
+                   generated_at = NULL,
+                   updated_at = CURRENT_TIMESTAMP""",
+            (memory_id, user_id, rendering_status, search_query, provider, requested_count),
+        )
+        connection.execute(
+            "DELETE FROM inspiration_rendering_results WHERE user_id = ? AND memory_id = ?",
+            (user_id, memory_id),
+        )
+
+
+def complete_inspiration_rendering(
+    user_id: str,
+    memory_id: int,
+    rendering_status: str,
+    results: list[dict[str, Any]],
+    attempts: int,
+    error_code: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    """Atomically replace results and finish one user-scoped rendering attempt."""
+    if rendering_status not in {"succeeded", "partial", "failed"}:
+        raise ValueError("Invalid final rendering status")
+    safe_error = error_message[:500] if error_message else None
+    initialize_database()
+    with _connect() as connection:
+        rendering = connection.execute(
+            """SELECT 1 FROM memory_inspiration_renderings
+               WHERE user_id = ? AND memory_id = ?""",
+            (user_id, memory_id),
+        ).fetchone()
+        if rendering is None:
+            raise ValueError("Rendering not found")
+        connection.execute(
+            "DELETE FROM inspiration_rendering_results WHERE user_id = ? AND memory_id = ?",
+            (user_id, memory_id),
+        )
+        for result in results:
+            connection.execute(
+                """INSERT INTO inspiration_rendering_results (
+                       memory_id, user_id, title, summary, url, source_domain, rank
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    memory_id, user_id, result["title"], result["summary"], result["url"],
+                    result["source_domain"], int(result["rank"]),
+                ),
+            )
+        connection.execute(
+            """UPDATE memory_inspiration_renderings SET
+                   rendering_status = ?, result_count = ?, error_code = ?,
+                   error_message = ?, attempts = ?, generated_at = CURRENT_TIMESTAMP,
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE user_id = ? AND memory_id = ?""",
+            (
+                rendering_status, len(results), error_code, safe_error, attempts,
+                user_id, memory_id,
+            ),
+        )
+
+
+def get_inspiration_rendering(user_id: str, memory_id: int) -> dict[str, Any] | None:
+    """Return one rendering and its ranked results without crossing user boundaries."""
+    initialize_database()
+    with _connect() as connection:
+        row = connection.execute(
+            """SELECT * FROM memory_inspiration_renderings
+               WHERE user_id = ? AND memory_id = ?""",
+            (user_id, memory_id),
+        ).fetchone()
+        if row is None:
+            return None
+        results = connection.execute(
+            """SELECT title, summary, url, source_domain, rank, generated_at
+               FROM inspiration_rendering_results
+               WHERE user_id = ? AND memory_id = ? ORDER BY rank""",
+            (user_id, memory_id),
+        ).fetchall()
+    rendering = dict(row)
+    rendering["results"] = [dict(result) for result in results]
+    return rendering
 
 
 def get_memory(user_id: str, memory_id: int) -> dict[str, Any] | None:

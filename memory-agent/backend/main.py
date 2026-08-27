@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from openai import APITimeoutError
+from openai import APIConnectionError, APIStatusError, APITimeoutError
 from pydantic import BaseModel, Field, field_validator
 
 from app_meta import APP_NAME, APP_VERSION
@@ -43,6 +43,7 @@ from database import (
     search_memories_by_keyword,
     update_memory,
 )
+from inspiration_rendering import public_inspiration_rendering, render_inspiration
 from llm_service import (
     classify_intent,
     classify_memory_category,
@@ -103,6 +104,7 @@ class MemoryStoreRequest(BaseModel):
     content: str = Field(min_length=1, max_length=10_000)
     tags: list[str] = Field(default_factory=list, max_length=20)
     category: MemoryCategory | None = None
+    inspiration_rendering: bool = False
 
 
 class MemoryUpdateRequest(BaseModel):
@@ -118,6 +120,7 @@ class MemoryQueryRequest(BaseModel):
 class AutoMemoryRequest(BaseModel):
     input: str = Field(min_length=1, max_length=10_000)
     conversation_id: str | None = None
+    inspiration_rendering: bool = False
 
 
 def require_current_user(
@@ -208,6 +211,34 @@ def _store_memory(user_id: str, content: str, tags: list[str], category: str | N
         mark_embedding_result(user_id, memory_id, str(exc)[:500])
         raise
     return {"success": True, "memory_id": memory_id, "message": "记忆已保存"}
+
+
+def _render_saved_memory(
+    user_id: str, result: dict[str, Any], content: str, category: str
+) -> dict[str, Any]:
+    """Append rendering state without allowing it to change memory success."""
+    result["memory_saved"] = True
+    try:
+        result["inspiration_rendering"] = render_inspiration(
+            user_id, int(result["memory_id"]), content, category
+        )
+    except Exception as exc:
+        logger.exception(
+            "Failed to record inspiration rendering stage=rendering_or_persistence user_id=%s memory_id=%s error_type=%s",
+            user_id, result["memory_id"], type(exc).__name__,
+        )
+        result["inspiration_rendering"] = {
+            "status": "failed",
+            "search_query": None,
+            "provider": None,
+            "requested_count": 5,
+            "result_count": 0,
+            "error_code": "provider_error",
+            "message": "记忆已保存，但灵感渲染暂时不可用。",
+            "generated_at": None,
+            "results": [],
+        }
+    return result
 
 
 def _query_memory(
@@ -335,7 +366,11 @@ def me(current_user: CurrentUser) -> dict[str, str]:
 @app.post("/api/memory/store")
 def store_memory(payload: MemoryStoreRequest, current_user: CurrentUser) -> dict[str, Any]:
     category = classify_memory_category(payload.content)
-    return _store_memory(str(current_user["id"]), payload.content, payload.tags, category)
+    user_id = str(current_user["id"])
+    result = _store_memory(user_id, payload.content, payload.tags, category)
+    if payload.inspiration_rendering:
+        _render_saved_memory(user_id, result, payload.content, str(category))
+    return result
 
 
 @app.post("/api/memory/query")
@@ -350,6 +385,19 @@ def auto_memory(payload: AutoMemoryRequest, current_user: CurrentUser) -> dict[s
         return _run_auto_memory(user_id, payload)
     except APITimeoutError:
         raise HTTPException(status_code=504, detail="Model service timed out") from None
+    except APIConnectionError:
+        raise HTTPException(status_code=502, detail="Unable to connect to the model service") from None
+    except APIStatusError as exc:
+        logger.warning(
+            "Model service rejected auto-memory request status=%s error_type=%s",
+            exc.status_code,
+            type(exc).__name__,
+        )
+        if exc.status_code in (401, 403):
+            detail = "Model service rejected the configured credentials or model"
+        else:
+            detail = f"Model service returned HTTP {exc.status_code}"
+        raise HTTPException(status_code=502, detail=detail) from None
 
 
 def _run_auto_memory(user_id: str, payload: AutoMemoryRequest) -> dict[str, Any]:
@@ -363,6 +411,8 @@ def _run_auto_memory(user_id: str, payload: AutoMemoryRequest) -> dict[str, Any]
         content = intent_result["extracted_content"]
         category = classify_memory_category(content)
         result = _store_memory(user_id, content, intent_result["extracted_tags"], category)
+        if payload.inspiration_rendering:
+            _render_saved_memory(user_id, result, content, str(category))
         assistant_text = result["message"]
     else:
         result = _query_memory(user_id, payload.input)
@@ -387,6 +437,29 @@ def get_memories(
         category_filter=category,
         sort_order=sort_order,
     )
+
+
+@app.get("/api/memories/{memory_id}/inspiration-rendering")
+def get_memory_inspiration_rendering(
+    memory_id: int, current_user: CurrentUser
+) -> dict[str, Any]:
+    user_id = str(current_user["id"])
+    if get_memory(user_id, memory_id) is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    rendering = public_inspiration_rendering(user_id, memory_id)
+    if rendering is not None:
+        return rendering
+    return {
+        "status": "not_requested",
+        "search_query": None,
+        "provider": None,
+        "requested_count": 5,
+        "result_count": 0,
+        "error_code": None,
+        "message": None,
+        "generated_at": None,
+        "results": [],
+    }
 
 
 @app.get("/api/calendar/month")

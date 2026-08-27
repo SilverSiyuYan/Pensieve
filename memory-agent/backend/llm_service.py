@@ -183,6 +183,58 @@ def classify_memory_category(content: str) -> MemoryCategory:
         return DEFAULT_MEMORY_CATEGORY
 
 
+def summarize_inspiration_search_results(
+    inspiration: str, results: list[dict[str, Any]]
+) -> dict[int, str]:
+    """Summarize only supplied search results; titles and URLs remain provider-owned."""
+    source_lines = []
+    for result in results:
+        source_lines.append(
+            f"{result['rank']}. 标题：{result['title']}\n"
+            f"网页摘要：{result['summary']}"
+        )
+    response = _get_client().chat.completions.create(
+        model=os.getenv("INSPIRATION_SUMMARY_MODEL", _model_name()),
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "你只负责说明给定网页资料与用户灵感的具体关联。不得创建、猜测或输出 URL，"
+                    "不得添加输入列表之外的资料。每条概括应包含资料能帮助验证、扩展或实施该灵感的具体方面，"
+                    "不能只复述标题。只返回 JSON：{\"summaries\":[{\"rank\":1,\"summary\":\"...\"}]}。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"<inspiration>\n{inspiration}\n</inspiration>\n<results>\n"
+                + "\n".join(source_lines)
+                + "\n</results>",
+            },
+        ],
+        temperature=0,
+        response_format={"type": "json_object"},
+        timeout=float(os.getenv("INSPIRATION_SUMMARY_TIMEOUT_SECONDS", "15")),
+    )
+    payload = _parse_json_response(response.choices[0].message.content or "{}")
+    items = payload.get("summaries")
+    if set(payload) != {"summaries"} or not isinstance(items, list):
+        raise ValueError("Summary response must contain only a summaries list")
+    valid_ranks = {int(result["rank"]) for result in results}
+    summaries: dict[int, str] = {}
+    for item in items:
+        if not isinstance(item, dict) or set(item) != {"rank", "summary"}:
+            raise ValueError("Each summary must contain rank and summary")
+        rank, summary = item["rank"], item["summary"]
+        if isinstance(rank, bool) or not isinstance(rank, int) or rank not in valid_ranks:
+            raise ValueError("Summary rank does not match an input result")
+        if rank in summaries or not isinstance(summary, str) or not summary.strip():
+            raise ValueError("Summary must be unique and non-empty")
+        summaries[rank] = summary.strip()
+    if set(summaries) != valid_ranks:
+        raise ValueError("Every input result must have one summary")
+    return summaries
+
+
 def _validated_date_mention(payload: Any, content: str) -> dict[str, Any]:
     required_fields = {
         "original_expression", "normalized_text", "start_date", "end_date", "confidence"

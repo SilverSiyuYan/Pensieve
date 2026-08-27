@@ -36,7 +36,24 @@
       details { margin-top:10px; padding:8px 10px; background:var(--surface-muted); border-radius:8px; color:var(--muted); font-size:.9rem; }
       summary { cursor:pointer; color:var(--text); font-weight:600; }
       .source-item { margin:8px 0 0; }
-      .composer { display:flex; gap:10px; padding:16px; border-top:1px solid var(--border); }
+      .rendering-results { display:grid; gap:9px; margin-top:10px; }
+      .rendering-result { padding:9px 10px; background:var(--surface-muted); border-radius:9px; white-space:normal; }
+      .rendering-result-title { margin:0 0 4px; font-size:.92rem; line-height:1.4; }
+      .rendering-result-summary { margin:0 0 6px; color:var(--text); font-size:.85rem; line-height:1.5; }
+      .rendering-result-meta { display:flex; flex-wrap:wrap; align-items:center; gap:8px; color:var(--muted); font-size:.76rem; }
+      .rendering-result-link { color:var(--primary); font-weight:600; }
+      .rendering-empty { margin:8px 0 0; color:var(--muted); font-size:.84rem; }
+      .composer { display:grid; gap:10px; padding:16px; border-top:1px solid var(--border); }
+      .composer-row { display:flex; gap:10px; align-items:flex-end; }
+      .rendering-option { display:flex; align-items:center; gap:7px; min-height:26px; color:var(--muted); font-size:.84rem; }
+      .rendering-option label { display:flex; align-items:center; gap:7px; cursor:pointer; }
+      .rendering-option input { width:16px; height:16px; margin:0; accent-color:var(--primary); }
+      .rendering-option input:disabled + span { opacity:.65; }
+      .tooltip-wrap { position:relative; display:inline-flex; }
+      .rendering-help { width:22px; height:22px; padding:0; color:var(--muted); background:var(--surface-muted); border:1px solid var(--border); border-radius:50%; font-size:.76rem; font-weight:700; }
+      .rendering-help:hover,.rendering-help:focus-visible { color:var(--primary); outline:2px solid color-mix(in srgb,var(--primary) 35%,transparent); outline-offset:2px; transform:none; }
+      .rendering-tooltip { position:absolute; z-index:10; left:0; bottom:calc(100% + 8px); width:min(330px,calc(100vw - 48px)); padding:9px 11px; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:9px; box-shadow:var(--shadow); font-size:.8rem; line-height:1.5; opacity:0; visibility:hidden; pointer-events:none; transition:opacity .15s,visibility .15s; }
+      .tooltip-wrap:hover .rendering-tooltip,.tooltip-wrap:focus-within .rendering-tooltip,.tooltip-wrap.open .rendering-tooltip { opacity:1; visibility:visible; }
       textarea { flex:1; min-height:46px; max-height:130px; resize:vertical; padding:12px; color:var(--text); background:var(--surface-muted); border:1px solid var(--border); border-radius:11px; font:inherit; }
       .send { align-self:flex-end; padding:12px 18px; color:var(--primary-text); background:var(--primary); }
       .send:hover { background:var(--primary-hover); } .send:disabled { opacity:.6; cursor:wait; transform:none; }
@@ -90,7 +107,7 @@
       .date-expression { padding:3px 7px; border-radius:20px; color:var(--primary); background:color-mix(in srgb,var(--primary) 12%,transparent); }
       @media (max-width:820px) { .app-shell { padding:12px; } .layout,.calendar-view { grid-template-columns:1fr; } .chat-panel { min-height:62vh; } .memory-list { max-height:44vh; } .calendar-day,.calendar-blank { min-height:82px; } }
       @media (max-width:600px) { .topbar { align-items:flex-start; flex-direction:column; } .top-actions { width:100%; flex-wrap:wrap; } .calendar-panel,.calendar-detail { padding:12px; } .calendar-toolbar { align-items:stretch; flex-direction:column; } .calendar-toolbar h2 { order:-1; } .calendar-actions { justify-content:space-between; } .calendar-day,.calendar-blank { min-height:64px; padding:4px; } .day-count { padding:1px 3px; font-size:.58rem; } }
-      @media (max-width:480px) { .subtitle { display:none; } .chat-history { padding:15px; } .message { max-width:96%; } .composer { padding:12px; } .send { padding:12px; } .memory-controls { grid-template-columns:1fr; } }
+      @media (max-width:480px) { .subtitle { display:none; } .chat-history { padding:15px; } .message { max-width:96%; } .composer { padding:12px; } .rendering-option { position:relative; } .tooltip-wrap { position:static; } .composer-row { align-items:stretch; flex-direction:column; } .send { width:100%; padding:12px; } .rendering-tooltip { left:0; right:auto; width:calc(100vw - 32px); } .memory-controls { grid-template-columns:1fr; } }
     </style>
   </head>
   <body>
@@ -113,8 +130,14 @@
           <div id="chat-history" class="chat-history"><p class="empty-chat">你好！告诉我需要记住的事，或问问过去记录了什么。</p></div>
           <p id="chat-error" class="error" hidden></p>
           <form id="chat-form" class="composer">
-            <textarea id="user-input" placeholder="例如：帮我记住周四洗头，或问：这周有什么安排？" aria-label="输入消息" required></textarea>
-            <button id="send-button" class="send" type="submit">发送</button>
+            <div class="rendering-option">
+              <label for="inspiration-rendering-toggle"><input id="inspiration-rendering-toggle" type="checkbox" /><span>灵感渲染</span></label>
+              <span id="inspiration-rendering-tooltip-wrap" class="tooltip-wrap">
+                <button id="inspiration-rendering-help" class="rendering-help" type="button" aria-label="了解灵感渲染" aria-describedby="inspiration-rendering-tooltip" aria-expanded="false">?</button>
+                <span id="inspiration-rendering-tooltip" class="rendering-tooltip" role="tooltip">开启后，会将本次灵感发送至联网检索服务，搜索并概括 5 条高相关资料与来源链接，用于拓宽思路；关闭时仍按原流程记录。</span>
+              </span>
+            </div>
+            <div class="composer-row"><textarea id="user-input" placeholder="例如：帮我记住周四洗头，或问：这周有什么安排？" aria-label="输入消息" required></textarea><button id="send-button" class="send" type="submit">发送</button></div>
           </form>
         </section>
         <aside class="panel memory-panel" aria-label="记忆列表">
@@ -156,9 +179,9 @@
       </section>
     </main>
     <script src="config.js?v=0.2.0-timeout-fix"></script>
-    <script src="api-runtime.js?v=0.2.0-timeout-fix"></script>
+    <script src="api-runtime.js?v=0.2.0-inspiration-errors"></script>
     <script>
-      const { ApiError, resolveApiBase: resolveConfiguredApiBase, transportError, parseJsonResponse, validateHealthResponse } = window.MemoryAgentApi;
+      const { ApiError, resolveApiBase: resolveConfiguredApiBase, transportError, parseJsonResponse, validateHealthResponse, createAutoMemoryPayload } = window.MemoryAgentApi;
       // 唯一优先级：?apiBase → 项目 config.js → 同源默认地址。
       const projectApiBase = window.MEMORY_AGENT_CONFIG?.apiBase;
       let apiBaseUrl;
@@ -204,6 +227,7 @@
       let accessToken = localStorage.getItem('memory-agent-access-token') || '';
       let currentConversationId = null;
       let memoryRequestId = 0;
+      let memorySubmissionPending = false;
       let calendarMonthRequestId = 0;
       let calendarDayRequestId = 0;
       let selectedCalendarDate = '';
@@ -233,6 +257,9 @@
       const chatForm = document.querySelector('#chat-form');
       const userInput = document.querySelector('#user-input');
       const sendButton = document.querySelector('#send-button');
+      const inspirationRenderingToggle = document.querySelector('#inspiration-rendering-toggle');
+      const inspirationRenderingHelp = document.querySelector('#inspiration-rendering-help');
+      const inspirationRenderingTooltipWrap = document.querySelector('#inspiration-rendering-tooltip-wrap');
       const chatError = document.querySelector('#chat-error');
       const memoryList = document.querySelector('#memory-list');
       const memoryCount = document.querySelector('#memory-count');
@@ -274,11 +301,13 @@
       }
       function showAuth(message = '') {
         accessToken = ''; currentConversationId = null; localStorage.removeItem('memory-agent-access-token');
+        inspirationRenderingToggle.checked = false; inspirationRenderingTooltipWrap.classList.remove('open'); inspirationRenderingHelp.setAttribute('aria-expanded', 'false');
         authPanel.hidden = false; appLayout.hidden = true; calendarView.hidden = true; viewNav.hidden = true; logoutButton.hidden = true; accountName.textContent = '';
         authError.textContent = message; authError.hidden = !message;
       }
       function showApp(user) {
         const today = applicationToday(); calendarYear = Number(today.slice(0, 4)); calendarMonth = Number(today.slice(5, 7));
+        inspirationRenderingToggle.checked = false; inspirationRenderingTooltipWrap.classList.remove('open'); inspirationRenderingHelp.setAttribute('aria-expanded', 'false');
         authPanel.hidden = true; viewNav.hidden = false; logoutButton.hidden = false; accountName.textContent = user.email;
         showMemoryView(); loadMemories(); userInput.focus();
       }
@@ -302,7 +331,41 @@
           authPassword.value = ''; showApp(result.user);
         } catch (error) { authError.textContent = error.message; authError.hidden = false; }
       }
-      function addMessage(role, text, sourceMemories = []) {
+      function safeExternalUrl(value) {
+        try {
+          const parsed = new URL(String(value || ''));
+          if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return null;
+          return parsed.href;
+        } catch { return null; }
+      }
+      function appendInspirationRendering(bubble, rendering) {
+        if (!rendering || !Array.isArray(rendering.results)) return;
+        const results = rendering.results
+          .filter((item) => item && Number.isInteger(Number(item.rank)))
+          .sort((left, right) => Number(left.rank) - Number(right.rank))
+          .slice(0, 5);
+        if (!results.length) {
+          if (rendering.status === 'succeeded' || rendering.status === 'partial') {
+            const empty = document.createElement('p'); empty.className = 'rendering-empty'; empty.textContent = '暂时没有可展示的可信资料。'; bubble.append(empty);
+          }
+          return;
+        }
+        const list = document.createElement('section'); list.className = 'rendering-results'; list.setAttribute('aria-label', '灵感渲染资料');
+        results.forEach((result) => {
+          const item = document.createElement('article'); item.className = 'rendering-result';
+          const title = document.createElement('h3'); title.className = 'rendering-result-title'; title.textContent = String(result.title || '未命名资料');
+          const summary = document.createElement('p'); summary.className = 'rendering-result-summary'; summary.textContent = String(result.summary || '暂无概括。');
+          const meta = document.createElement('div'); meta.className = 'rendering-result-meta';
+          const domain = document.createElement('span'); domain.textContent = `来源：${String(result.source_domain || '未知来源')}`; meta.append(domain);
+          const safeUrl = safeExternalUrl(result.url);
+          if (safeUrl) {
+            const link = document.createElement('a'); link.className = 'rendering-result-link'; link.href = safeUrl; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = '访问资料'; meta.append(link);
+          }
+          item.append(title, summary, meta); list.append(item);
+        });
+        bubble.append(list);
+      }
+      function addMessage(role, text, sourceMemories = [], inspirationRendering = null) {
         chatHistory.querySelector('.empty-chat')?.remove();
         const message = document.createElement('article');
         message.className = `message ${role}`;
@@ -324,7 +387,26 @@
           });
           bubble.append(details);
         }
+        if (role === 'assistant' && inspirationRendering) appendInspirationRendering(bubble, inspirationRendering);
         chatHistory.append(message); scrollChatToBottom();
+      }
+      function renderingMessage(rendering) {
+        if (!rendering) return '记忆已保存，但灵感渲染状态暂时不可用。';
+        if (rendering.status === 'succeeded') return '记忆已保存；灵感渲染完成。';
+        if (rendering.status === 'partial') return `记忆已保存；灵感渲染部分完成。${rendering.message || `已返回 ${rendering.result_count || 0} 条可信资料。`}`;
+        if (rendering.status === 'skipped_not_inspiration') return '记忆已保存；该内容未分类为灵感，因此未执行灵感渲染。';
+        if (rendering.status === 'pending') return '记忆已保存；灵感渲染仍在处理中。';
+        if (rendering.status === 'not_requested') return '记忆已保存；未请求灵感渲染。';
+        return rendering.message || '记忆已保存，但灵感渲染暂时不可用。';
+      }
+      function memorySaveFailureMessage(error) {
+        if (!(error instanceof ApiError)) return '记忆保存失败，请稍后重试。';
+        if (error.kind === 'forbidden') return '当前账号无权限保存这条记忆。';
+        if (error.kind === 'timeout' || error.kind === 'upstream-timeout') return '保存请求超时，暂时无法确认记忆是否已经保存。请刷新记忆列表后再重试。';
+        if (error.kind === 'network-refused' || error.kind === 'browser-network' || error.kind === 'upstream') return '暂时无法连接服务，无法确认记忆是否已经保存。请检查连接后刷新记忆列表。';
+        if (error.kind === 'server' || error.kind === 'database') return '记忆保存失败，服务器暂时无法处理请求。';
+        if (error.kind === 'http' || error.kind === 'response-format' || error.kind === 'not-found' || error.kind === 'version' || error.kind === 'config') return error.message;
+        return '记忆保存失败，请稍后重试。';
       }
       function answerWithoutSources(answer) { return answer.split('【原始记录】')[0].trim() || answer; }
       function renderMemories(memories) {
@@ -456,23 +538,43 @@
       }
       chatForm.addEventListener('submit', async (event) => {
         event.preventDefault();
+        if (memorySubmissionPending) return;
         const input = userInput.value.trim(); if (!input) return;
+        const renderingRequested = inspirationRenderingToggle.checked === true;
+        const requestPayload = createAutoMemoryPayload(input, currentConversationId, renderingRequested);
         clearError(); addMessage('user', input); userInput.value = '';
-        sendButton.disabled = true; sendButton.textContent = '思考中…';
+        memorySubmissionPending = true; chatForm.setAttribute('aria-busy', 'true');
+        sendButton.disabled = true; inspirationRenderingToggle.disabled = true;
+        sendButton.textContent = renderingRequested ? '正在保存并检索相关灵感…' : '思考中…';
         try {
           const result = await request('/api/memory/auto', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input, conversation_id: currentConversationId }),
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestPayload),
           }, 120000);
           currentConversationId = result.conversation_id || currentConversationId;
           if (result.success && result.memory_id) {
-            addMessage('assistant', `已记住：${input}`); await loadMemories();
+            if (renderingRequested) {
+              let rendering = result.inspiration_rendering;
+              if (!rendering) {
+                try { rendering = await request(`/api/memories/${result.memory_id}/inspiration-rendering`); }
+                catch (error) { console.warn('Unable to recover inspiration rendering status', error); }
+              }
+              addMessage('assistant', renderingMessage(rendering), [], rendering);
+            }
+            else addMessage('assistant', `已记住：${input}`);
+            await loadMemories();
           } else {
             addMessage('assistant', answerWithoutSources(result.answer || '暂时没有找到答案。'), result.source_memories || []);
           }
         } catch (error) {
-          showError(error.message); addMessage('assistant', '抱歉，这次请求没有成功，请稍后再试。');
+          if (error instanceof ApiError && error.kind === 'auth') {
+            showAuth('登录已失效，请重新登录。');
+          } else {
+            const message = memorySaveFailureMessage(error);
+            showError(message); addMessage('assistant', message);
+          }
         } finally {
-          sendButton.disabled = false; sendButton.textContent = '发送'; userInput.focus();
+          memorySubmissionPending = false; chatForm.removeAttribute('aria-busy');
+          sendButton.disabled = false; inspirationRenderingToggle.disabled = false; sendButton.textContent = '发送'; userInput.focus();
         }
       });
       function setTheme(theme) {
@@ -480,6 +582,18 @@
         themeToggle.textContent = theme === 'dark' ? '☀️ 浅色' : '🌙 深色';
       }
       themeToggle.addEventListener('click', () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
+      inspirationRenderingHelp.addEventListener('click', () => {
+        const open = inspirationRenderingTooltipWrap.classList.toggle('open');
+        inspirationRenderingHelp.setAttribute('aria-expanded', String(open));
+      });
+      document.addEventListener('click', (event) => {
+        if (inspirationRenderingTooltipWrap.contains(event.target)) return;
+        inspirationRenderingTooltipWrap.classList.remove('open'); inspirationRenderingHelp.setAttribute('aria-expanded', 'false');
+      });
+      inspirationRenderingHelp.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        inspirationRenderingTooltipWrap.classList.remove('open'); inspirationRenderingHelp.setAttribute('aria-expanded', 'false'); inspirationRenderingHelp.blur();
+      });
       memoryCategory.addEventListener('change', loadMemories);
       memorySortOrder.addEventListener('change', loadMemories);
       memoryViewButton.addEventListener('click', showMemoryView);

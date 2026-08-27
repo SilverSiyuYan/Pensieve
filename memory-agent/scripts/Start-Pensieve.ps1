@@ -65,6 +65,11 @@ function Test-BackendHealth {
     try {
         $response = Invoke-RestMethod "$backendBase/api/health" -TimeoutSec 3
         if ($response.application -eq 'memory-agent' -and $response.status -eq 'ok' -and $response.database_accessible -eq $true) {
+            $schema = Invoke-RestMethod "$backendBase/openapi.json" -TimeoutSec 3
+            $autoRequest = $schema.components.schemas.AutoMemoryRequest
+            if (-not $autoRequest -or -not $autoRequest.properties.inspiration_rendering) {
+                return [pscustomobject]@{ Healthy = $false; Detail = 'Pensieve backend is stale: AutoMemoryRequest does not support inspiration_rendering' }
+            }
             return [pscustomobject]@{ Healthy = $true; Detail = "HTTP 200, memory-agent $($response.version), database accessible" }
         }
         return [pscustomobject]@{ Healthy = $false; Detail = "Unexpected health response: $($response | ConvertTo-Json -Compress -Depth 3)" }

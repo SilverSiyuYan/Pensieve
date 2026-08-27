@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 import httpx
-from openai import APITimeoutError
+from openai import APIConnectionError, PermissionDeniedError, APITimeoutError
 import pytest
 
 import database
@@ -175,6 +175,44 @@ def test_auto_memory_reports_model_timeout_as_cors_visible_504(
     assert response.status_code == 504
     assert response.json() == {"detail": "Model service timed out"}
     assert response.headers["access-control-allow-origin"] == origin
+
+
+@pytest.mark.parametrize(
+    ("exception", "detail"),
+    [
+        (
+            APIConnectionError(request=httpx.Request("POST", "https://model.invalid/chat")),
+            "Unable to connect to the model service",
+        ),
+        (
+            PermissionDeniedError(
+                "model denied",
+                response=httpx.Response(
+                    403,
+                    request=httpx.Request("POST", "https://model.invalid/chat"),
+                ),
+                body=None,
+            ),
+            "Model service rejected the configured credentials or model",
+        ),
+    ],
+)
+def test_auto_memory_maps_model_failures_to_actionable_502(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, exception: Exception, detail: str
+) -> None:
+    token = register(client, f"model-error-{type(exception).__name__}@example.com")
+
+    def fail(value: str):
+        del value
+        raise exception
+
+    monkeypatch.setattr(main, "classify_intent", fail)
+    response = client.post(
+        "/api/memory/auto", headers=auth(token), json={"input": "测试模型故障"}
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": detail}
 
 
 def test_classification_failure_still_saves_unmodified_memory(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

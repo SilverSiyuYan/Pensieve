@@ -38,8 +38,10 @@ def test_network_failures_show_actionable_backend_error() -> None:
     assert "登录失效或尚未登录" in API_RUNTIME
     assert "无权限执行此操作" in API_RUNTIME
     assert "前后端版本不匹配" in API_RUNTIME
-    assert "后端内部错误" in API_RUNTIME
+    assert "服务器暂时无法处理请求" in API_RUNTIME
+    assert "后端内部错误" not in API_RUNTIME
     assert "模型服务响应超时" in API_RUNTIME
+    assert "模型或检索服务暂时不可用" in API_RUNTIME
     assert "后端响应格式异常" in API_RUNTIME
 
 
@@ -51,7 +53,7 @@ def test_long_running_memory_request_has_a_dedicated_timeout() -> None:
 
 def test_api_base_has_one_explicit_priority_and_is_normalised() -> None:
     assert '<script src="config.js?v=0.2.0-timeout-fix"></script>' in HTML
-    assert '<script src="api-runtime.js?v=0.2.0-timeout-fix"></script>' in HTML
+    assert '<script src="api-runtime.js?v=0.2.0-inspiration-errors"></script>' in HTML
     assert "resolveConfiguredApiBase(window.location.href, projectApiBase)" in HTML
     assert "const verifyApiAvailability = async () =>" in HTML
     assert "memory-agent-api-base" not in HTML
@@ -140,3 +142,62 @@ def test_calendar_mobile_layout_stacks_panels_and_compacts_cells() -> None:
     assert ".layout,.calendar-view { grid-template-columns:1fr; }" in HTML
     assert "@media (max-width:600px)" in HTML
     assert ".calendar-day,.calendar-blank { min-height:64px; padding:4px; }" in HTML
+
+
+def test_inspiration_rendering_toggle_is_optional_and_resets_for_auth_sessions() -> None:
+    assert 'id="inspiration-rendering-toggle" type="checkbox"' in HTML
+    assert 'id="inspiration-rendering-toggle" type="checkbox" checked' not in HTML
+    assert "createAutoMemoryPayload(input, currentConversationId, renderingRequested)" in HTML
+    assert "inspirationRenderingToggle.checked === true" in HTML
+    assert "body: JSON.stringify(requestPayload)" in HTML
+    assert "inspirationRenderingToggle.checked = false" in HTML
+    assert "memory-agent-inspiration" not in HTML
+
+
+def test_rendering_tooltip_supports_pointer_keyboard_and_touch() -> None:
+    assert 'aria-describedby="inspiration-rendering-tooltip"' in HTML
+    assert 'aria-expanded="false"' in HTML
+    assert 'role="tooltip"' in HTML
+    assert "开启后，会将本次灵感发送至联网检索服务" in HTML
+    assert ".tooltip-wrap:hover .rendering-tooltip" in HTML
+    assert ".tooltip-wrap:focus-within .rendering-tooltip" in HTML
+    assert "inspirationRenderingHelp.addEventListener('click'" in HTML
+    assert "if (event.key !== 'Escape') return" in HTML
+
+
+def test_rendering_statuses_keep_memory_success_separate_from_search_failure() -> None:
+    assert "正在保存并检索相关灵感…" in HTML
+    assert "记忆已保存，但灵感渲染暂时不可用。" in HTML
+    assert "记忆已保存；该内容未分类为灵感，因此未执行灵感渲染。" in HTML
+    assert "记忆已保存；灵感渲染部分完成。" in HTML
+    assert "记忆已保存；灵感渲染完成。" in HTML
+    assert "inspirationRenderingToggle.disabled = true" in HTML
+    assert "inspirationRenderingToggle.disabled = false" in HTML
+    assert "`/api/memories/${result.memory_id}/inspiration-rendering`" in HTML
+    assert "let rendering = result.inspiration_rendering" in HTML
+    assert "if (memorySubmissionPending) return" in HTML
+    assert "chatForm.setAttribute('aria-busy', 'true')" in HTML
+    assert "登录已失效，请重新登录。" in HTML
+    assert "当前账号无权限保存这条记忆。" in HTML
+    assert "暂时无法确认记忆是否已经保存" in HTML
+
+
+def test_rendering_results_use_safe_dom_and_backend_rank() -> None:
+    assert "function appendInspirationRendering" in HTML
+    assert ".sort((left, right) => Number(left.rank) - Number(right.rank))" in HTML
+    assert ".slice(0, 5)" in HTML
+    for field in ("result.title", "result.summary", "result.source_domain", "result.url"):
+        assert field in HTML
+    assert "link.target = '_blank'" in HTML
+    assert "link.rel = 'noopener noreferrer'" in HTML
+    assert "['http:', 'https:'].includes(parsed.protocol)" in HTML
+    assert "parsed.username || parsed.password" in HTML
+    assert "innerHTML" not in HTML
+
+
+def test_rendering_mobile_composer_stays_responsive() -> None:
+    assert ".composer-row { align-items:stretch; flex-direction:column; }" in HTML
+    assert ".rendering-option { position:relative; }" in HTML
+    assert ".tooltip-wrap { position:static; }" in HTML
+    assert ".send { width:100%; padding:12px; }" in HTML
+    assert ".rendering-tooltip { left:0; right:auto; width:calc(100vw - 32px); }" in HTML

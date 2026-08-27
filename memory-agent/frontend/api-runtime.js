@@ -36,7 +36,8 @@
     if (status === 403) return new ApiError('forbidden', `无权限执行此操作${suffix}`, 403);
     if (status === 404) return new ApiError('not-found', `接口不存在，可能是前后端版本不匹配${suffix}`, 404);
     if (status === 504) return new ApiError('upstream-timeout', `模型服务响应超时${suffix}`, 504);
-    if (status >= 500) return new ApiError('server', `后端内部错误（HTTP ${status}）${suffix}`, status);
+    if (status === 502) return new ApiError('upstream', `模型或检索服务暂时不可用${suffix}`, 502);
+    if (status >= 500) return new ApiError('server', '服务器暂时无法处理请求，请稍后再试。', status);
     return new ApiError('http', detail || `请求失败（HTTP ${status}）`, status);
   }
 
@@ -72,9 +73,24 @@
       if (!response.ok) throw statusError(response.status);
       throw new ApiError('response-format', `后端响应格式异常：期望 JSON，实际为 ${response.headers.get('content-type') || '未知类型'}。`, response.status);
     }
-    if (!response.ok) throw statusError(response.status, data.detail || '');
+    if (!response.ok) {
+      const safeDetail = typeof data.user_message === 'string'
+        ? data.user_message
+        : typeof data.message === 'string'
+          ? data.message
+          : response.status < 500 && typeof data.detail === 'string'
+            ? data.detail
+            : '';
+      throw statusError(response.status, safeDetail.slice(0, 200));
+    }
     return data;
   }
 
-  global.MemoryAgentApi = Object.freeze({ ApiError, normaliseApiBase, resolveApiBase, statusError, transportError, parseJsonResponse, validateHealthResponse });
+  function createAutoMemoryPayload(input, conversationId, renderingRequested) {
+    const payload = { input: String(input), conversation_id: conversationId || null };
+    if (renderingRequested === true) payload.inspiration_rendering = true;
+    return payload;
+  }
+
+  global.MemoryAgentApi = Object.freeze({ ApiError, normaliseApiBase, resolveApiBase, statusError, transportError, parseJsonResponse, validateHealthResponse, createAutoMemoryPayload });
 })(globalThis);

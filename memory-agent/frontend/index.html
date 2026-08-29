@@ -4,19 +4,28 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
-    <title>智能记忆助手</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap" />
+    <title>PENSIEVE</title>
     <style>
-      :root { --bg:#f5f7fb; --surface:#fff; --surface-muted:#f1f4f9; --text:#1c2536; --muted:#68748a; --border:#e0e6ef; --primary:#5865f2; --primary-hover:#4653db; --primary-text:#fff; --danger:#d84b5b; --shadow:0 10px 28px rgba(35,50,78,.08); --user-bubble:#5865f2; --assistant-bubble:#fff; }
-      [data-theme="dark"] { --bg:#121722; --surface:#1d2533; --surface-muted:#273142; --text:#ecf1f8; --muted:#a8b4c7; --border:#344055; --primary:#7c88ff; --primary-hover:#99a2ff; --primary-text:#111522; --danger:#ff7584; --shadow:0 10px 28px rgba(0,0,0,.22); --user-bubble:#6c78fa; --assistant-bubble:#1d2533; }
+      @font-face { font-family:"ZQFS"; src:url("./assets/fonts/ZhuqueFangsong-Regular.ttf") format("truetype"); font-weight:400; font-style:normal; font-display:swap; }
+      :root { --bg:#05080f; --surface:rgba(8,15,26,.78); --surface-muted:rgba(14,24,40,.72); --text:#e9edf3; --muted:#8993a3; --border:rgba(180,195,215,.25); --primary:#7edbff; --primary-hover:#69c6ea; --primary-text:#07101b; --danger:#e47b86; --shadow:0 8px 30px rgba(0,0,0,.35); --user-bubble:#243b59; --assistant-bubble:rgba(12,20,34,.82); }
+      [data-theme="dark"] { --bg:#05080f; --surface:rgba(8,15,26,.78); --surface-muted:rgba(14,24,40,.72); --text:#e9edf3; --muted:#8993a3; --border:rgba(180,195,215,.25); --primary:#7edbff; --primary-hover:#69c6ea; --primary-text:#07101b; --danger:#ef8a95; --shadow:0 8px 30px rgba(0,0,0,.38); --user-bubble:#243b59; --assistant-bubble:rgba(12,20,34,.82); }
       * { box-sizing:border-box; }
-      body { margin:0; min-height:100vh; background:var(--bg); color:var(--text); font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+      body { margin:0; min-height:100vh; background-color:var(--bg); background-image:url('./主背景.png'); background-size:cover; background-position:center center; background-repeat:no-repeat; background-attachment:fixed; color:var(--text); font-family:"Noto Serif SC","Source Han Serif SC","Songti SC","SimSun",serif; }
+      h1,h2,h3 { font-family:"Cormorant Garamond","STKaiti","KaiTi","Kaiti SC","FangSong","STFangsong",serif; font-weight:600; }
+      .panel,.memory-card,.calendar-memory,.random-memory-item,.auth-form input,textarea,.memory-control select,.calendar-button,.calendar-sort,details,.rendering-result,.view-nav,.memory-square-mode-switch { backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); }
       .app-shell { max-width:1440px; margin:0 auto; padding:20px; }
       .topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
       h1 { margin:0; font-size:clamp(1.35rem,3vw,1.8rem); }
-      .subtitle { color:var(--muted); font-size:.9rem; margin:5px 0 0; }
+      .subtitle { color:var(--muted); font-size:.9rem; margin:5px 0 0; font-family:"Cormorant Garamond","Noto Serif SC","Source Han Serif SC","Songti SC","SimSun",serif; font-style:italic; font-weight:400; }
+      body { font-family:"ZQFS","FangSong","STFangsong","Songti SC","SimSun",serif; line-height:1.78; letter-spacing:.02em; }
+      h1,h2,h3 { font-family:"ZQFS","FangSong","STFangsong",serif; font-weight:500; letter-spacing:.06em; }
+      button,input,textarea,select { font-family:inherit; }
+      .subtitle { font-family:"Cormorant Garamond","ZQFS","FangSong",serif; font-style:italic; font-weight:400; letter-spacing:.04em; }
       button { border:0; border-radius:10px; cursor:pointer; font:inherit; transition:background .2s,transform .2s,opacity .2s; }
       button:hover { transform:translateY(-1px); }
       .theme-toggle { background:var(--surface); color:var(--text); border:1px solid var(--border); padding:9px 12px; }
+      #theme-toggle { display:none; }
       .top-actions { display:flex; align-items:center; gap:10px; } .account-name { color:var(--muted); font-size:.85rem; }
       .auth-panel { max-width:420px; margin:10vh auto; padding:24px; } .auth-panel h2 { margin:0 0 8px; }
       .auth-form { display:grid; gap:12px; margin-top:18px; } .auth-form input { padding:12px; color:var(--text); background:var(--surface-muted); border:1px solid var(--border); border-radius:11px; font:inherit; }
@@ -131,26 +140,187 @@
       @media (max-width:820px) { .app-shell { padding:12px; } .layout,.calendar-view { grid-template-columns:1fr; } .chat-panel { min-height:62vh; } .memory-list { max-height:44vh; } .calendar-day,.calendar-blank { min-height:82px; } }
       @media (max-width:600px) { .topbar { align-items:flex-start; flex-direction:column; } .top-actions { width:100%; flex-wrap:wrap; } .calendar-panel,.calendar-detail { padding:12px; } .calendar-toolbar { align-items:stretch; flex-direction:column; } .calendar-toolbar h2 { order:-1; } .calendar-actions { justify-content:space-between; } .calendar-day,.calendar-blank { min-height:64px; padding:4px; } .day-count { padding:1px 3px; font-size:.58rem; } }
       @media (max-width:480px) { .subtitle { display:none; } .chat-history { padding:15px; } .message { max-width:96%; } .composer { padding:12px; } .rendering-option { position:relative; } .tooltip-wrap { position:static; } .composer-row { align-items:stretch; flex-direction:column; } .send { width:100%; padding:12px; } .rendering-tooltip { left:0; right:auto; width:calc(100vw - 32px); } .memory-controls { grid-template-columns:1fr; } }
+      body { background-color:#05080f; background-image:radial-gradient(circle at 50% 35%,rgba(70,110,160,.16) 0%,rgba(25,45,70,.08) 30%,rgba(5,8,15,0) 65%),linear-gradient(180deg,rgba(8,13,22,.72) 0%,rgba(5,8,15,.88) 100%),url('./主背景.png'); background-size:cover; background-position:center center; background-repeat:no-repeat; background-attachment:fixed; }
+      h1,h2,h3 { color:#e2e7ed; }
+      .subtitle { color:#aab3c0; }
+      .panel,.memory-card,.calendar-memory,.random-memory-item { border-color:rgba(180,195,215,.25); box-shadow:var(--shadow),inset 0 1px 0 rgba(255,255,255,.025); }
+      button { color:var(--text); }
+      .theme-toggle,.calendar-button,.calendar-sort { background:linear-gradient(180deg,rgba(36,54,80,.92),rgba(21,34,55,.96)); border:1px solid rgba(190,210,230,.4); color:#edf2f7; }
+      .theme-toggle:hover,.calendar-button:hover,.calendar-sort:hover { background:linear-gradient(180deg,rgba(46,70,100,.96),rgba(27,43,67,.98)); border-color:rgba(120,205,240,.7); box-shadow:0 0 16px rgba(90,190,230,.12); }
+      .auth-actions button,.send,.random-memory-actions button { background:linear-gradient(180deg,rgba(36,54,80,.92),rgba(21,34,55,.96)); border:1px solid rgba(190,210,230,.4); color:#edf2f7; }
+      .auth-actions button:hover,.send:hover,.random-memory-actions button:hover { background:linear-gradient(180deg,rgba(46,70,100,.96),rgba(27,43,67,.98)); border-color:rgba(120,205,240,.7); box-shadow:0 0 16px rgba(90,190,230,.12); }
+      .auth-form input,textarea,.memory-control select { background:rgba(3,8,15,.68); border-color:rgba(180,195,215,.22); color:#dce3eb; }
+      .auth-form input::placeholder,textarea::placeholder { color:#697484; }
+      .auth-form input:focus,textarea:focus,.memory-control select:focus { border-color:rgba(110,200,240,.6); outline:none; box-shadow:0 0 0 2px rgba(100,190,230,.06); }
+      .view-nav,.memory-square-mode-switch { background:rgba(8,15,26,.7); border-bottom:1px solid rgba(160,175,195,.12); }
+      .view-nav button,.memory-square-mode-switch button { color:#aab2be; }
+      .view-nav button:hover,.memory-square-mode-switch button:hover { color:#e3eaf1; }
+      .view-nav button.active,.memory-square-mode-switch button.active { color:#82d5f3; background:rgba(36,54,80,.72); }
+      .memory-content,.bubble,.calendar-memory p,.random-memory-item p { color:#b9c1cc; letter-spacing:.03em; }
+      .memory-content { font-weight:400; line-height:1.75; }
+      .bubble { line-height:1.75; }
+      .rendering-result,.calendar-memory,details { color:#b9c1cc; }
+      .rendering-result-title,summary,.calendar-section h3 { color:#e2e7ed; }
+      .rendering-result-link,.day-count.mentioned,.tag { color:#7edbff; }
+      .delete { color:#b8c5d5; }
+      .view-nav { gap:8px; padding:0; background:transparent; border:0; backdrop-filter:none; -webkit-backdrop-filter:none; }
+      .view-nav button { width:20px; height:20px; padding:0; border:1px solid #aeb6c1; border-radius:4px; background:linear-gradient(145deg,#eef1f4,#8d96a2); box-shadow:inset 0 1px 0 rgba(255,255,255,.8),0 2px 6px rgba(0,0,0,.28); }
+      .view-nav button:hover { border-color:#f4f6f8; background:linear-gradient(145deg,#fff,#aeb6c1); }
+      .view-nav button.active { border-color:#f7f8fa; background:linear-gradient(145deg,#fff,#c7cdd4); box-shadow:0 0 0 2px rgba(220,226,233,.2),0 0 10px rgba(210,220,232,.4); }
+      .view-nav button:focus-visible { outline:2px solid #eef2f6; outline-offset:3px; }
+      .topbar > div:first-child { min-width:0; }
+      .topbar h1 { font-family:"Cinzel Decorative","Cinzel","Cormorant Garamond",Georgia,serif; font-size:clamp(2rem,5vw,3.4rem); font-weight:500; letter-spacing:.08em; text-transform:uppercase; color:#eef3f8; text-shadow:0 0 8px rgba(180,210,240,.18),0 0 20px rgba(100,160,220,.08); }
+      .topbar .subtitle { display:block; max-width:min(78ch,70vw); font-family:"Cormorant Garamond",Georgia,serif; font-size:clamp(.78rem,1.35vw,1.08rem); font-style:italic; font-weight:400; letter-spacing:.02em; line-height:1.4; overflow-wrap:break-word; }
+      .topbar .subtitle { max-width:100%; font-size:clamp(.78rem,1.2vw,1rem); letter-spacing:.14em; line-height:1.35; white-space:nowrap; }
+      @media (max-width:600px) { .topbar .subtitle { font-size:.76rem; } }
+      .cursor-layer { display:none; position:fixed; inset:0; z-index:99999; pointer-events:none; opacity:0; transition:opacity .12s ease; }
+      .cursor-layer.visible:not(.native-cursor) { opacity:1; }
+      .cursor-dot,.cursor-trail { position:fixed; top:0; left:0; border-radius:50%; pointer-events:none; will-change:transform; }
+      .cursor-dot { width:5px; height:5px; margin:-2.5px 0 0 -2.5px; background:#eef2f6; box-shadow:0 0 4px rgba(238,242,246,.9),0 0 10px rgba(210,220,235,.35); transition:width .12s,height .12s,margin .12s,background .12s,box-shadow .12s; }
+      .cursor-layer.interactive .cursor-dot { width:6px; height:6px; margin:-3px 0 0 -3px; background:#fff; box-shadow:0 0 5px rgba(242,245,248,.95),0 0 11px rgba(221,227,234,.45); }
+      .cursor-trail { width:3px; height:3px; margin:-1.5px 0 0 -1.5px; background:#dde3ea; opacity:0; transition:opacity .1s ease; }
+      .cursor-layer.moving .cursor-trail { opacity:var(--trail-opacity); }
+      .cursor-click { position:fixed; width:8px; height:8px; margin:-4px 0 0 -4px; border:1px solid rgba(231,236,242,.65); border-radius:50%; pointer-events:none; animation:cursor-click-fade .2s ease-out forwards; }
+      @keyframes cursor-click-fade { to { opacity:0; transform:scale(2.1); } }
+      @media (hover:hover) and (pointer:fine) {
+        .cursor-layer { display:block; }
+        body.cursor-enhanced { cursor:none; }
+        body.cursor-enhanced :is(button,a,summary,label,[role="button"]) { cursor:none !important; }
+        body.cursor-enhanced :is(p,h1,h2,h3,.bubble,.memory-content,[contenteditable="true"]) { cursor:text !important; }
+        body.cursor-enhanced :is(input,textarea,select) { cursor:auto !important; }
+        body.cursor-enhanced input:not([type="checkbox"]):not([type="radio"]) { cursor:text !important; }
+      }
+      @media (prefers-reduced-motion:reduce) { .cursor-trail { display:none; } .cursor-click { animation-duration:.01ms; } }
+
+      /* Responsive safety: keep dynamic content inside its owning surface. */
+      img,canvas,svg { max-width:100%; height:auto; }
+      .app-shell,.view-panel,.layout,.calendar-view,.memory-square-panel,.panel,.chat-history,.composer-row,.message,.bubble,details,.rendering-results,.rendering-result,.memory-card,.memory-meta,.memory-tags,.calendar-grid,.calendar-day,.calendar-detail-heading,.calendar-memory,.calendar-memory-footer,.random-memory-stage,.random-memory-item { min-width:0; }
+      .app-shell,.view-panel,.layout,.calendar-view,.memory-square-panel { width:100%; }
+      .bubble,.source-item,.rendering-result-title,.rendering-result-summary,.rendering-result-meta,.memory-content,.tag,.account-name,.calendar-memory p,.date-expression,.random-memory-item p { overflow-wrap:anywhere; word-break:break-word; }
+      .bubble,.source-item,.rendering-result,.memory-content,.tag,.date-expression,.random-memory-item { max-width:100%; }
+      .random-memory-stage { display:grid; }
+      .random-memory-stage .random-memory-item { position:relative; inset:auto; grid-area:1 / 1; }
+
+      /* Tablet: preserve the desktop theme while removing multi-column pressure. */
+      @media (max-width:1023px) {
+        body { min-height:100dvh; background-attachment:scroll; }
+        .app-shell,.view-panel,.layout,.calendar-view,.memory-square-panel,.calendar-panel,.calendar-detail,.memory-panel { max-width:100%; }
+        #memory-square-calendar.active { grid-template-columns:minmax(0,1fr); }
+      }
+
+      /* Mobile: single-column controls, touch targets, and dynamic viewport sizing. */
+      @media (max-width:767px) {
+        body { background-position:center top; }
+        .app-shell { padding:12px max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left)); }
+        .topbar { align-items:flex-start; flex-direction:column; gap:12px; }
+        .top-actions { width:100%; min-width:0; flex-wrap:wrap; }
+        .topbar .subtitle { max-width:100%; white-space:normal; }
+        .account-name { max-width:100%; }
+        .view-nav button { width:44px; height:44px; border-radius:10px; font-size:.8rem; }
+        #memory-view-button::after { content:"忆"; }
+        #calendar-view-button::after { content:"历"; }
+        .theme-toggle,.auth-actions button,.send,.random-memory-actions button,.calendar-button,.memory-square-mode-switch button { min-height:44px; }
+        .auth-panel { width:100%; margin:clamp(28px,8dvh,72px) auto; }
+        .auth-form input,textarea,.memory-control select,.calendar-sort { font-size:16px; }
+        .chat-panel { min-height:62vh; min-height:62dvh; }
+        .chat-history { max-width:100%; }
+        .message { max-width:96%; }
+        .composer-row { align-items:stretch; flex-direction:column; }
+        textarea { width:100%; max-width:100%; scroll-margin-bottom:calc(72px + env(safe-area-inset-bottom)); }
+        .send { width:100%; align-self:stretch; }
+        .rendering-option { position:relative; min-height:44px; flex-wrap:wrap; }
+        .rendering-option label { min-height:44px; }
+        .rendering-option input { width:20px; height:20px; }
+        .tooltip-wrap { position:static; }
+        .rendering-help { width:44px; height:44px; }
+        .rendering-tooltip { left:0; right:auto; width:min(330px,calc(100dvw - 48px)); max-height:85dvh; overflow-y:auto; }
+        .memory-list { max-height:none; overflow-y:visible; }
+        .memory-card,.calendar-memory,.random-memory-item { width:100%; }
+        .memory-meta { flex-wrap:wrap; }
+        .memory-tags { max-width:100%; }
+        .delete { min-width:44px; min-height:44px; margin-left:auto; }
+        #memory-square-calendar.active { width:100%; grid-template-columns:minmax(0,1fr); gap:14px; }
+        .calendar-panel,.calendar-detail { width:100%; }
+        .calendar-grid,.weekday-row { width:100%; grid-template-columns:repeat(7,minmax(0,1fr)); }
+        .calendar-day,.calendar-blank { width:100%; min-width:0; min-height:72px; padding:6px; }
+        .day-count { max-width:100%; overflow-wrap:anywhere; word-break:break-word; }
+        .calendar-detail-heading { flex-wrap:wrap; }
+        .date-expression { max-width:100%; }
+        .panel,.memory-card,.calendar-memory,.random-memory-item,.auth-form input,textarea,.memory-control select,.calendar-button,.calendar-sort,details,.rendering-result,.memory-square-mode-switch { backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+        button:active { transform:scale(.98); }
+        :is(button,a,input,textarea,select,summary):focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+      }
+
+      @media (max-width:600px) {
+        .calendar-panel,.calendar-detail { padding:12px; }
+        .calendar-toolbar { align-items:stretch; flex-direction:column; }
+        .calendar-toolbar h2 { order:-1; }
+        .calendar-actions { justify-content:space-between; }
+        .calendar-day,.calendar-blank { min-height:64px; padding:4px; }
+        .day-number { width:26px; height:26px; font-size:.9rem; }
+        .day-counts { width:100%; }
+        .day-count { width:100%; padding:1px 3px; font-size:clamp(9px,2.2vw,11px); line-height:1.2; text-align:center; white-space:normal; }
+        .calendar-detail-heading { align-items:stretch; }
+      }
+
+      /* Small mobile: reduce chrome, not content or functionality. */
+      @media (max-width:479px) {
+        .topbar .subtitle { display:none; }
+        .auth-panel { margin:24px auto; padding:16px; }
+        .chat-history { padding:12px; }
+        .message { max-width:100%; gap:7px; }
+        .composer { padding:12px; }
+        .memory-panel { padding:12px; }
+        .memory-controls { grid-template-columns:1fr; }
+        .calendar-panel,.calendar-detail { padding:10px; }
+        .weekday { padding:6px 1px; font-size:clamp(.65rem,2.8vw,.76rem); }
+        .calendar-day,.calendar-blank { min-height:82px; padding:3px; }
+        .day-number { width:24px; height:24px; font-size:.82rem; }
+        .day-counts { gap:2px; margin-top:4px; }
+        .day-count { max-width:100%; padding:1px 2px; }
+        .calendar-detail-heading { flex-direction:column; }
+        .calendar-sort { width:100%; }
+        .random-memory-item { padding:14px; }
+      }
     </style>
   </head>
   <body>
+    <div id="cursor-layer" class="cursor-layer" aria-hidden="true">
+      <span class="cursor-dot"></span>
+      <span class="cursor-trail" style="--trail-opacity:.18"></span>
+      <span class="cursor-trail" style="--trail-opacity:.14"></span>
+      <span class="cursor-trail" style="--trail-opacity:.11"></span>
+      <span class="cursor-trail" style="--trail-opacity:.08"></span>
+      <span class="cursor-trail" style="--trail-opacity:.05"></span>
+    </div>
     <main class="app-shell">
       <header class="topbar">
-        <div><h1>智能记忆助手</h1><p class="subtitle">记录、检索并整理属于你的长期记忆</p></div>
+        <div>
+          <h1>PENSIEVE</h1>
+          <p class="subtitle">
+            Siphon Store Review Examine
+          </p>
+        </div>
         <div class="top-actions"><nav id="view-nav" class="view-nav" aria-label="主导航" hidden></nav><span id="account-name" class="account-name"></span><button id="logout-button" class="theme-toggle" type="button" hidden>退出</button><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换深浅色模式">🌙 深色</button></div>
       </header>
       <section id="auth-panel" class="panel auth-panel">
         <h2>登录记忆账户</h2><p class="subtitle">登录后，每个账户拥有独立的长期记忆。</p>
         <p id="auth-error" class="error" hidden></p>
         <form id="auth-form" class="auth-form">
-          <input id="auth-email" type="email" autocomplete="email" placeholder="邮箱" required />
+          <input id="auth-email" type="text" autocomplete="username" placeholder="账户名" required />
           <input id="auth-password" type="password" autocomplete="current-password" minlength="10" maxlength="128" placeholder="密码（至少 10 位）" required />
           <div class="auth-actions"><button id="login-button" type="submit">登录</button><button id="register-button" type="button">注册</button></div>
         </form>
       </section>
       <section id="app-layout" class="layout view-panel active" hidden>
         <section class="panel chat-panel" aria-label="对话区域">
-          <div id="chat-history" class="chat-history"><p class="empty-chat">你好！告诉我需要记住的事，或问问过去记录了什么。</p></div>
+          <div id="chat-history" class="chat-history">
+            <p class="empty-chat">
+              “One simply siphons the excess thoughts from one's mind, pours them into the basin,
+              and examines them at one's leisure. It becomes easier to spot patterns and links,
+              you understand, when they are in this form.”——Albus Dumbledore
+            </p>
+          </div>
           <p id="chat-error" class="error" hidden></p>
           <form id="chat-form" class="composer">
             <div class="rendering-option">
@@ -318,6 +488,7 @@
       const authPassword = document.querySelector('#auth-password');
       const authError = document.querySelector('#auth-error');
       const registerButton = document.querySelector('#register-button');
+      const internalAccountSuffix = '@pensieve.local';
       const logoutButton = document.querySelector('#logout-button');
       const accountName = document.querySelector('#account-name');
       const chatHistory = document.querySelector('#chat-history');
@@ -348,6 +519,13 @@
       const mentionedMemoryCount = document.querySelector('#mentioned-memory-count');
       const themeToggle = document.querySelector('#theme-toggle');
       const scrollChatToBottom = () => { chatHistory.scrollTop = chatHistory.scrollHeight; };
+      const accountApiValue = (value) => {
+        const accountName = value.trim();
+        return accountName.includes('@') ? accountName : `${accountName}${internalAccountSuffix}`;
+      };
+      const accountDisplayValue = (value) => value.endsWith(internalAccountSuffix)
+        ? value.slice(0, -internalAccountSuffix.length)
+        : value;
       function showError(message) { chatError.textContent = message; chatError.hidden = false; }
       function clearError() { chatError.hidden = true; chatError.textContent = ''; }
       async function request(path, options = {}, timeoutMs = 10000) {
@@ -387,11 +565,13 @@
           memoryButton.id = 'memory-view-button';
           memoryButton.type = 'button';
           memoryButton.className = 'active';
-          memoryButton.textContent = '记忆';
+          memoryButton.setAttribute('aria-label', '记忆');
+          memoryButton.title = '记忆';
           const calendarButton = document.createElement('button');
           calendarButton.id = 'calendar-view-button';
           calendarButton.type = 'button';
-          calendarButton.textContent = '记忆广场';
+          calendarButton.setAttribute('aria-label', '记忆广场');
+          calendarButton.title = '记忆广场';
           memoryButton.addEventListener('click', showMemoryView);
           calendarButton.addEventListener('click', showCalendarView);
           viewNav.replaceChildren(memoryButton, calendarButton);
@@ -438,8 +618,14 @@
         calendarView.style.display = isMemoryView ? 'none' : 'grid';
         appLayout.classList.toggle('active', isMemoryView);
         calendarView.classList.toggle('active', !isMemoryView);
-        if (memoryViewButton) memoryViewButton.classList.toggle('active', isMemoryView);
-        if (calendarViewButton) calendarViewButton.classList.toggle('active', !isMemoryView);
+        if (memoryViewButton) {
+          memoryViewButton.classList.toggle('active', isMemoryView);
+          memoryViewButton.setAttribute('aria-pressed', String(isMemoryView));
+        }
+        if (calendarViewButton) {
+          calendarViewButton.classList.toggle('active', !isMemoryView);
+          calendarViewButton.setAttribute('aria-pressed', String(!isMemoryView));
+        }
         if (!isMemoryView) syncMemorySquareMode(memorySquareMode);
       }
       function resetAccountScopedCalendarState() {
@@ -486,7 +672,7 @@
         inspirationRenderingToggle.checked = false; inspirationRenderingTooltipWrap.classList.remove('open'); inspirationRenderingHelp.setAttribute('aria-expanded', 'false');
         authPanel.hidden = true;
         ensureViewButtons();
-        logoutButton.hidden = false; accountName.textContent = user.email;
+        logoutButton.hidden = false; accountName.textContent = accountDisplayValue(user.email);
         syncViewState('memory');
         loadMemories();
         userInput.focus();
@@ -501,10 +687,17 @@
       }
       async function authenticate(mode) {
         authError.hidden = true;
+        if (!authEmail.value.trim()) {
+          authEmail.setCustomValidity('请输入账户名。');
+          authEmail.reportValidity();
+          authEmail.setCustomValidity('');
+          return;
+        }
+        if (!authForm.reportValidity()) return;
         try {
           const result = await request(`/api/auth/${mode}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: authEmail.value.trim(), password: authPassword.value }),
+            body: JSON.stringify({ email: accountApiValue(authEmail.value), password: authPassword.value }),
           });
           accessToken = result.access_token; writeStoredAccessToken(accessToken);
           authPassword.value = ''; showApp(result.user);
@@ -793,6 +986,12 @@
           chatForm.requestSubmit();
         }
       });
+      const keepMobileComposerVisible = () => {
+        if (window.innerWidth >= 768 || document.activeElement !== userInput) return;
+        window.requestAnimationFrame(() => chatForm.scrollIntoView({ block: 'end', inline: 'nearest' }));
+      };
+      userInput.addEventListener('focus', keepMobileComposerVisible);
+      window.visualViewport?.addEventListener('resize', keepMobileComposerVisible);
       chatForm.addEventListener('submit', async (event) => {
         event.preventDefault();
         if (memorySubmissionPending) return;
@@ -869,6 +1068,76 @@
       authForm.addEventListener('submit', (event) => { event.preventDefault(); authenticate('login'); });
       registerButton.addEventListener('click', () => authenticate('register'));
       logoutButton.addEventListener('click', async () => { try { await request('/api/auth/logout', { method: 'POST' }); } finally { showAuth(); } });
+      function initializeSilverCursor() {
+        const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)');
+        if (!finePointer.matches) return;
+        const layer = document.querySelector('#cursor-layer');
+        const dot = layer?.querySelector('.cursor-dot');
+        const trails = [...(layer?.querySelectorAll('.cursor-trail') || [])];
+        if (!layer || !dot || !trails.length) return;
+        const nativeCursorSelector = 'input,textarea,select,[contenteditable="true"],p,h1,h2,h3,.bubble,.memory-content';
+        const interactiveSelector = 'button,a,summary,label,[role="button"]';
+        const trailPoints = trails.map(() => ({ x: 0, y: 0 }));
+        let targetX = 0;
+        let targetY = 0;
+        let initialized = false;
+        let frameId = 0;
+        let fadeTimer = 0;
+        document.body.classList.add('cursor-enhanced');
+        const renderCursor = () => {
+          dot.style.transform = `translate3d(${targetX}px,${targetY}px,0)`;
+          let leadX = targetX;
+          let leadY = targetY;
+          let unsettled = false;
+          trails.forEach((trail, index) => {
+            const point = trailPoints[index];
+            const ease = .32 - (index * .035);
+            point.x += (leadX - point.x) * ease;
+            point.y += (leadY - point.y) * ease;
+            trail.style.transform = `translate3d(${point.x}px,${point.y}px,0)`;
+            unsettled ||= Math.abs(leadX - point.x) > .08 || Math.abs(leadY - point.y) > .08;
+            leadX = point.x;
+            leadY = point.y;
+          });
+          frameId = unsettled ? window.requestAnimationFrame(renderCursor) : 0;
+        };
+        const scheduleRender = () => {
+          if (!frameId) frameId = window.requestAnimationFrame(renderCursor);
+        };
+        document.addEventListener('pointermove', (event) => {
+          if (event.pointerType && event.pointerType !== 'mouse') return;
+          targetX = event.clientX;
+          targetY = event.clientY;
+          if (!initialized) {
+            trailPoints.forEach((point) => { point.x = targetX; point.y = targetY; });
+            initialized = true;
+          }
+          const target = event.target instanceof Element ? event.target : null;
+          layer.classList.toggle('native-cursor', Boolean(target?.closest(nativeCursorSelector)));
+          layer.classList.toggle('interactive', Boolean(target?.closest(interactiveSelector)));
+          layer.classList.add('visible', 'moving');
+          window.clearTimeout(fadeTimer);
+          fadeTimer = window.setTimeout(() => layer.classList.remove('moving'), 80);
+          scheduleRender();
+        }, { passive: true });
+        const hideCursor = () => {
+          layer.classList.remove('visible', 'moving', 'interactive', 'native-cursor');
+          window.clearTimeout(fadeTimer);
+        };
+        document.documentElement.addEventListener('pointerleave', hideCursor);
+        window.addEventListener('blur', hideCursor);
+        document.addEventListener('pointerdown', (event) => {
+          if ((event.pointerType && event.pointerType !== 'mouse') || layer.classList.contains('native-cursor')) return;
+          const ring = document.createElement('span');
+          ring.className = 'cursor-click';
+          ring.style.left = `${event.clientX}px`;
+          ring.style.top = `${event.clientY}px`;
+          layer.append(ring);
+          ring.addEventListener('animationend', () => ring.remove(), { once: true });
+          window.setTimeout(() => ring.remove(), 260);
+        }, { passive: true });
+      }
+      initializeSilverCursor();
       setTheme(localStorage.getItem('memory-agent-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
       if (accessToken) request('/api/auth/me').then(showApp).catch(() => showAuth('登录已过期，请重新登录。')); else showAuth();
     </script>

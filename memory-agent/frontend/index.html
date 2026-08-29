@@ -191,6 +191,97 @@
         body.cursor-enhanced input:not([type="checkbox"]):not([type="radio"]) { cursor:text !important; }
       }
       @media (prefers-reduced-motion:reduce) { .cursor-trail { display:none; } .cursor-click { animation-duration:.01ms; } }
+
+      /* Responsive safety: keep dynamic content inside its owning surface. */
+      img,canvas,svg { max-width:100%; height:auto; }
+      .app-shell,.view-panel,.layout,.calendar-view,.memory-square-panel,.panel,.chat-history,.composer-row,.message,.bubble,details,.rendering-results,.rendering-result,.memory-card,.memory-meta,.memory-tags,.calendar-grid,.calendar-day,.calendar-detail-heading,.calendar-memory,.calendar-memory-footer,.random-memory-stage,.random-memory-item { min-width:0; }
+      .app-shell,.view-panel,.layout,.calendar-view,.memory-square-panel { width:100%; }
+      .bubble,.source-item,.rendering-result-title,.rendering-result-summary,.rendering-result-meta,.memory-content,.tag,.account-name,.calendar-memory p,.date-expression,.random-memory-item p { overflow-wrap:anywhere; word-break:break-word; }
+      .bubble,.source-item,.rendering-result,.memory-content,.tag,.date-expression,.random-memory-item { max-width:100%; }
+      .random-memory-stage { display:grid; }
+      .random-memory-stage .random-memory-item { position:relative; inset:auto; grid-area:1 / 1; }
+
+      /* Tablet: preserve the desktop theme while removing multi-column pressure. */
+      @media (max-width:1023px) {
+        body { min-height:100dvh; background-attachment:scroll; }
+        .app-shell,.view-panel,.layout,.calendar-view,.memory-square-panel,.calendar-panel,.calendar-detail,.memory-panel { max-width:100%; }
+        #memory-square-calendar.active { grid-template-columns:minmax(0,1fr); }
+      }
+
+      /* Mobile: single-column controls, touch targets, and dynamic viewport sizing. */
+      @media (max-width:767px) {
+        body { background-position:center top; }
+        .app-shell { padding:12px max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left)); }
+        .topbar { align-items:flex-start; flex-direction:column; gap:12px; }
+        .top-actions { width:100%; min-width:0; flex-wrap:wrap; }
+        .topbar .subtitle { max-width:100%; white-space:normal; }
+        .account-name { max-width:100%; }
+        .view-nav button { width:44px; height:44px; border-radius:10px; font-size:.8rem; }
+        #memory-view-button::after { content:"忆"; }
+        #calendar-view-button::after { content:"历"; }
+        .theme-toggle,.auth-actions button,.send,.random-memory-actions button,.calendar-button,.memory-square-mode-switch button { min-height:44px; }
+        .auth-panel { width:100%; margin:clamp(28px,8dvh,72px) auto; }
+        .auth-form input,textarea,.memory-control select,.calendar-sort { font-size:16px; }
+        .chat-panel { min-height:62vh; min-height:62dvh; }
+        .chat-history { max-width:100%; }
+        .message { max-width:96%; }
+        .composer-row { align-items:stretch; flex-direction:column; }
+        textarea { width:100%; max-width:100%; scroll-margin-bottom:calc(72px + env(safe-area-inset-bottom)); }
+        .send { width:100%; align-self:stretch; }
+        .rendering-option { position:relative; min-height:44px; flex-wrap:wrap; }
+        .rendering-option label { min-height:44px; }
+        .rendering-option input { width:20px; height:20px; }
+        .tooltip-wrap { position:static; }
+        .rendering-help { width:44px; height:44px; }
+        .rendering-tooltip { left:0; right:auto; width:min(330px,calc(100dvw - 48px)); max-height:85dvh; overflow-y:auto; }
+        .memory-list { max-height:none; overflow-y:visible; }
+        .memory-card,.calendar-memory,.random-memory-item { width:100%; }
+        .memory-meta { flex-wrap:wrap; }
+        .memory-tags { max-width:100%; }
+        .delete { min-width:44px; min-height:44px; margin-left:auto; }
+        #memory-square-calendar.active { width:100%; grid-template-columns:minmax(0,1fr); gap:14px; }
+        .calendar-panel,.calendar-detail { width:100%; }
+        .calendar-grid,.weekday-row { width:100%; grid-template-columns:repeat(7,minmax(0,1fr)); }
+        .calendar-day,.calendar-blank { width:100%; min-width:0; min-height:72px; padding:6px; }
+        .day-count { max-width:100%; overflow-wrap:anywhere; word-break:break-word; }
+        .calendar-detail-heading { flex-wrap:wrap; }
+        .date-expression { max-width:100%; }
+        .panel,.memory-card,.calendar-memory,.random-memory-item,.auth-form input,textarea,.memory-control select,.calendar-button,.calendar-sort,details,.rendering-result,.memory-square-mode-switch { backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+        button:active { transform:scale(.98); }
+        :is(button,a,input,textarea,select,summary):focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+      }
+
+      @media (max-width:600px) {
+        .calendar-panel,.calendar-detail { padding:12px; }
+        .calendar-toolbar { align-items:stretch; flex-direction:column; }
+        .calendar-toolbar h2 { order:-1; }
+        .calendar-actions { justify-content:space-between; }
+        .calendar-day,.calendar-blank { min-height:64px; padding:4px; }
+        .day-number { width:26px; height:26px; font-size:.9rem; }
+        .day-counts { width:100%; }
+        .day-count { width:100%; padding:1px 3px; font-size:clamp(9px,2.2vw,11px); line-height:1.2; text-align:center; white-space:normal; }
+        .calendar-detail-heading { align-items:stretch; }
+      }
+
+      /* Small mobile: reduce chrome, not content or functionality. */
+      @media (max-width:479px) {
+        .topbar .subtitle { display:none; }
+        .auth-panel { margin:24px auto; padding:16px; }
+        .chat-history { padding:12px; }
+        .message { max-width:100%; gap:7px; }
+        .composer { padding:12px; }
+        .memory-panel { padding:12px; }
+        .memory-controls { grid-template-columns:1fr; }
+        .calendar-panel,.calendar-detail { padding:10px; }
+        .weekday { padding:6px 1px; font-size:clamp(.65rem,2.8vw,.76rem); }
+        .calendar-day,.calendar-blank { min-height:82px; padding:3px; }
+        .day-number { width:24px; height:24px; font-size:.82rem; }
+        .day-counts { gap:2px; margin-top:4px; }
+        .day-count { max-width:100%; padding:1px 2px; }
+        .calendar-detail-heading { flex-direction:column; }
+        .calendar-sort { width:100%; }
+        .random-memory-item { padding:14px; }
+      }
     </style>
   </head>
   <body>
@@ -895,6 +986,12 @@
           chatForm.requestSubmit();
         }
       });
+      const keepMobileComposerVisible = () => {
+        if (window.innerWidth >= 768 || document.activeElement !== userInput) return;
+        window.requestAnimationFrame(() => chatForm.scrollIntoView({ block: 'end', inline: 'nearest' }));
+      };
+      userInput.addEventListener('focus', keepMobileComposerVisible);
+      window.visualViewport?.addEventListener('resize', keepMobileComposerVisible);
       chatForm.addEventListener('submit', async (event) => {
         event.preventDefault();
         if (memorySubmissionPending) return;

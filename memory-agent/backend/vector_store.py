@@ -41,6 +41,7 @@ def _normalise_metadata(user_id: str, memory_id: int, metadata: dict[str, Any]) 
 
 def add_to_vector(user_id: str, memory_id: int, content: str, metadata: dict[str, Any]) -> None:
     """Embed and persist a memory's original text in the ``memories`` collection."""
+    return
     _get_collection().upsert(
         ids=[_vector_id(user_id, memory_id)],
         documents=[content],
@@ -50,6 +51,7 @@ def add_to_vector(user_id: str, memory_id: int, content: str, metadata: dict[str
 
 def search_similar(user_id: str, query: str, top_k: int = 5) -> list[dict[str, Any]]:
     """Return the closest semantic memories, ordered by ChromaDB distance."""
+    return []
     if top_k <= 0:
         raise ValueError("top_k must be greater than zero")
 

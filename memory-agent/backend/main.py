@@ -10,6 +10,7 @@ from pathlib import Path
 import sqlite3
 from typing import Annotated, Any, Callable, Literal
 
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -63,8 +64,9 @@ from vector_store import (
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env", override=False)
-
+print("Loaded env: OPENAI_API_KEY =", os.getenv('OPENAI_API_KEY', 'NOT SET'))
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
+
 allowed_origins = [
     origin.strip()
     for origin in os.getenv(
@@ -595,3 +597,8 @@ def edit_memory(memory_id: int, payload: MemoryUpdateRequest, current_user: Curr
 def rebuild_memories(current_user: CurrentUser) -> dict[str, Any]:
     indexed_count = rebuild_vector_store(str(current_user["id"]))
     return {"success": True, "indexed_count": indexed_count, "message": "当前用户向量索引已重建"}
+    # Serve frontend static files (single-process deployment).
+FRONTEND_PATH = BASE_DIR.parent / "frontend"
+if FRONTEND_PATH.exists():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_PATH), html=True), name="frontend")
+

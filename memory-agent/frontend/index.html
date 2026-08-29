@@ -163,15 +163,53 @@
       .rendering-result-title,summary,.calendar-section h3 { color:#e2e7ed; }
       .rendering-result-link,.day-count.mentioned,.tag { color:#7edbff; }
       .delete { color:#b8c5d5; }
+      .view-nav { gap:8px; padding:0; background:transparent; border:0; backdrop-filter:none; -webkit-backdrop-filter:none; }
+      .view-nav button { width:20px; height:20px; padding:0; border:1px solid #aeb6c1; border-radius:4px; background:linear-gradient(145deg,#eef1f4,#8d96a2); box-shadow:inset 0 1px 0 rgba(255,255,255,.8),0 2px 6px rgba(0,0,0,.28); }
+      .view-nav button:hover { border-color:#f4f6f8; background:linear-gradient(145deg,#fff,#aeb6c1); }
+      .view-nav button.active { border-color:#f7f8fa; background:linear-gradient(145deg,#fff,#c7cdd4); box-shadow:0 0 0 2px rgba(220,226,233,.2),0 0 10px rgba(210,220,232,.4); }
+      .view-nav button:focus-visible { outline:2px solid #eef2f6; outline-offset:3px; }
       .topbar > div:first-child { min-width:0; }
       .topbar h1 { font-family:"Cinzel Decorative","Cinzel","Cormorant Garamond",Georgia,serif; font-size:clamp(2rem,5vw,3.4rem); font-weight:500; letter-spacing:.08em; text-transform:uppercase; color:#eef3f8; text-shadow:0 0 8px rgba(180,210,240,.18),0 0 20px rgba(100,160,220,.08); }
       .topbar .subtitle { display:block; max-width:min(78ch,70vw); font-family:"Cormorant Garamond",Georgia,serif; font-size:clamp(.78rem,1.35vw,1.08rem); font-style:italic; font-weight:400; letter-spacing:.02em; line-height:1.4; overflow-wrap:break-word; }
+      .topbar .subtitle { max-width:100%; font-size:clamp(.78rem,1.2vw,1rem); letter-spacing:.14em; line-height:1.35; white-space:nowrap; }
+      @media (max-width:600px) { .topbar .subtitle { font-size:.76rem; } }
+      .cursor-layer { display:none; position:fixed; inset:0; z-index:99999; pointer-events:none; opacity:0; transition:opacity .12s ease; }
+      .cursor-layer.visible:not(.native-cursor) { opacity:1; }
+      .cursor-dot,.cursor-trail { position:fixed; top:0; left:0; border-radius:50%; pointer-events:none; will-change:transform; }
+      .cursor-dot { width:5px; height:5px; margin:-2.5px 0 0 -2.5px; background:#eef2f6; box-shadow:0 0 4px rgba(238,242,246,.9),0 0 10px rgba(210,220,235,.35); transition:width .12s,height .12s,margin .12s,background .12s,box-shadow .12s; }
+      .cursor-layer.interactive .cursor-dot { width:6px; height:6px; margin:-3px 0 0 -3px; background:#fff; box-shadow:0 0 5px rgba(242,245,248,.95),0 0 11px rgba(221,227,234,.45); }
+      .cursor-trail { width:3px; height:3px; margin:-1.5px 0 0 -1.5px; background:#dde3ea; opacity:0; transition:opacity .1s ease; }
+      .cursor-layer.moving .cursor-trail { opacity:var(--trail-opacity); }
+      .cursor-click { position:fixed; width:8px; height:8px; margin:-4px 0 0 -4px; border:1px solid rgba(231,236,242,.65); border-radius:50%; pointer-events:none; animation:cursor-click-fade .2s ease-out forwards; }
+      @keyframes cursor-click-fade { to { opacity:0; transform:scale(2.1); } }
+      @media (hover:hover) and (pointer:fine) {
+        .cursor-layer { display:block; }
+        body.cursor-enhanced { cursor:none; }
+        body.cursor-enhanced :is(button,a,summary,label,[role="button"]) { cursor:none !important; }
+        body.cursor-enhanced :is(p,h1,h2,h3,.bubble,.memory-content,[contenteditable="true"]) { cursor:text !important; }
+        body.cursor-enhanced :is(input,textarea,select) { cursor:auto !important; }
+        body.cursor-enhanced input:not([type="checkbox"]):not([type="radio"]) { cursor:text !important; }
+      }
+      @media (prefers-reduced-motion:reduce) { .cursor-trail { display:none; } .cursor-click { animation-duration:.01ms; } }
     </style>
   </head>
   <body>
+    <div id="cursor-layer" class="cursor-layer" aria-hidden="true">
+      <span class="cursor-dot"></span>
+      <span class="cursor-trail" style="--trail-opacity:.18"></span>
+      <span class="cursor-trail" style="--trail-opacity:.14"></span>
+      <span class="cursor-trail" style="--trail-opacity:.11"></span>
+      <span class="cursor-trail" style="--trail-opacity:.08"></span>
+      <span class="cursor-trail" style="--trail-opacity:.05"></span>
+    </div>
     <main class="app-shell">
       <header class="topbar">
-        <div><h1>智能记忆助手</h1><p class="subtitle">记录、检索并整理属于你的长期记忆</p></div>
+        <div>
+          <h1>PENSIEVE</h1>
+          <p class="subtitle">
+            Siphon Store Review Examine
+          </p>
+        </div>
         <div class="top-actions"><nav id="view-nav" class="view-nav" aria-label="主导航" hidden></nav><span id="account-name" class="account-name"></span><button id="logout-button" class="theme-toggle" type="button" hidden>退出</button><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换深浅色模式">🌙 深色</button></div>
       </header>
       <section id="auth-panel" class="panel auth-panel">
@@ -185,7 +223,13 @@
       </section>
       <section id="app-layout" class="layout view-panel active" hidden>
         <section class="panel chat-panel" aria-label="对话区域">
-          <div id="chat-history" class="chat-history"><p class="empty-chat">你好！告诉我需要记住的事，或问问过去记录了什么。</p></div>
+          <div id="chat-history" class="chat-history">
+            <p class="empty-chat">
+              “One simply siphons the excess thoughts from one's mind, pours them into the basin,
+              and examines them at one's leisure. It becomes easier to spot patterns and links,
+              you understand, when they are in this form.”——Albus Dumbledore
+            </p>
+          </div>
           <p id="chat-error" class="error" hidden></p>
           <form id="chat-form" class="composer">
             <div class="rendering-option">
@@ -422,11 +466,13 @@
           memoryButton.id = 'memory-view-button';
           memoryButton.type = 'button';
           memoryButton.className = 'active';
-          memoryButton.textContent = '记忆';
+          memoryButton.setAttribute('aria-label', '记忆');
+          memoryButton.title = '记忆';
           const calendarButton = document.createElement('button');
           calendarButton.id = 'calendar-view-button';
           calendarButton.type = 'button';
-          calendarButton.textContent = '记忆广场';
+          calendarButton.setAttribute('aria-label', '记忆广场');
+          calendarButton.title = '记忆广场';
           memoryButton.addEventListener('click', showMemoryView);
           calendarButton.addEventListener('click', showCalendarView);
           viewNav.replaceChildren(memoryButton, calendarButton);
@@ -473,8 +519,14 @@
         calendarView.style.display = isMemoryView ? 'none' : 'grid';
         appLayout.classList.toggle('active', isMemoryView);
         calendarView.classList.toggle('active', !isMemoryView);
-        if (memoryViewButton) memoryViewButton.classList.toggle('active', isMemoryView);
-        if (calendarViewButton) calendarViewButton.classList.toggle('active', !isMemoryView);
+        if (memoryViewButton) {
+          memoryViewButton.classList.toggle('active', isMemoryView);
+          memoryViewButton.setAttribute('aria-pressed', String(isMemoryView));
+        }
+        if (calendarViewButton) {
+          calendarViewButton.classList.toggle('active', !isMemoryView);
+          calendarViewButton.setAttribute('aria-pressed', String(!isMemoryView));
+        }
         if (!isMemoryView) syncMemorySquareMode(memorySquareMode);
       }
       function resetAccountScopedCalendarState() {
@@ -904,6 +956,76 @@
       authForm.addEventListener('submit', (event) => { event.preventDefault(); authenticate('login'); });
       registerButton.addEventListener('click', () => authenticate('register'));
       logoutButton.addEventListener('click', async () => { try { await request('/api/auth/logout', { method: 'POST' }); } finally { showAuth(); } });
+      function initializeSilverCursor() {
+        const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)');
+        if (!finePointer.matches) return;
+        const layer = document.querySelector('#cursor-layer');
+        const dot = layer?.querySelector('.cursor-dot');
+        const trails = [...(layer?.querySelectorAll('.cursor-trail') || [])];
+        if (!layer || !dot || !trails.length) return;
+        const nativeCursorSelector = 'input,textarea,select,[contenteditable="true"],p,h1,h2,h3,.bubble,.memory-content';
+        const interactiveSelector = 'button,a,summary,label,[role="button"]';
+        const trailPoints = trails.map(() => ({ x: 0, y: 0 }));
+        let targetX = 0;
+        let targetY = 0;
+        let initialized = false;
+        let frameId = 0;
+        let fadeTimer = 0;
+        document.body.classList.add('cursor-enhanced');
+        const renderCursor = () => {
+          dot.style.transform = `translate3d(${targetX}px,${targetY}px,0)`;
+          let leadX = targetX;
+          let leadY = targetY;
+          let unsettled = false;
+          trails.forEach((trail, index) => {
+            const point = trailPoints[index];
+            const ease = .32 - (index * .035);
+            point.x += (leadX - point.x) * ease;
+            point.y += (leadY - point.y) * ease;
+            trail.style.transform = `translate3d(${point.x}px,${point.y}px,0)`;
+            unsettled ||= Math.abs(leadX - point.x) > .08 || Math.abs(leadY - point.y) > .08;
+            leadX = point.x;
+            leadY = point.y;
+          });
+          frameId = unsettled ? window.requestAnimationFrame(renderCursor) : 0;
+        };
+        const scheduleRender = () => {
+          if (!frameId) frameId = window.requestAnimationFrame(renderCursor);
+        };
+        document.addEventListener('pointermove', (event) => {
+          if (event.pointerType && event.pointerType !== 'mouse') return;
+          targetX = event.clientX;
+          targetY = event.clientY;
+          if (!initialized) {
+            trailPoints.forEach((point) => { point.x = targetX; point.y = targetY; });
+            initialized = true;
+          }
+          const target = event.target instanceof Element ? event.target : null;
+          layer.classList.toggle('native-cursor', Boolean(target?.closest(nativeCursorSelector)));
+          layer.classList.toggle('interactive', Boolean(target?.closest(interactiveSelector)));
+          layer.classList.add('visible', 'moving');
+          window.clearTimeout(fadeTimer);
+          fadeTimer = window.setTimeout(() => layer.classList.remove('moving'), 80);
+          scheduleRender();
+        }, { passive: true });
+        const hideCursor = () => {
+          layer.classList.remove('visible', 'moving', 'interactive', 'native-cursor');
+          window.clearTimeout(fadeTimer);
+        };
+        document.documentElement.addEventListener('pointerleave', hideCursor);
+        window.addEventListener('blur', hideCursor);
+        document.addEventListener('pointerdown', (event) => {
+          if ((event.pointerType && event.pointerType !== 'mouse') || layer.classList.contains('native-cursor')) return;
+          const ring = document.createElement('span');
+          ring.className = 'cursor-click';
+          ring.style.left = `${event.clientX}px`;
+          ring.style.top = `${event.clientY}px`;
+          layer.append(ring);
+          ring.addEventListener('animationend', () => ring.remove(), { once: true });
+          window.setTimeout(() => ring.remove(), 260);
+        }, { passive: true });
+      }
+      initializeSilverCursor();
       setTheme(localStorage.getItem('memory-agent-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
       if (accessToken) request('/api/auth/me').then(showApp).catch(() => showAuth('登录已过期，请重新登录。')); else showAuth();
     </script>

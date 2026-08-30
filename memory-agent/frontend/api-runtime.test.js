@@ -12,6 +12,14 @@ const configSandbox = { window: {} };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'config.js'), 'utf8'), configSandbox);
 assert.equal(configSandbox.window.MEMORY_AGENT_CONFIG.apiBase, 'http://127.0.0.1:8001');
 
+const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+const formatterMatch = html.match(/function formatMemoryTimestamp\(value\) \{[\s\S]*?\n\s*\}/);
+assert.ok(formatterMatch, 'formatMemoryTimestamp should be present');
+const formatterSandbox = { Intl, Date, applicationTimezone: 'Asia/Shanghai' };
+vm.runInNewContext(`${formatterMatch[0]}; globalThis.__formatMemoryTimestamp = formatMemoryTimestamp;`, formatterSandbox);
+assert.equal(formatterSandbox.__formatMemoryTimestamp('2026-08-20 02:00:00'), '2026-08-20 10:00');
+assert.equal(formatterSandbox.__formatMemoryTimestamp('2026-08-20T02:00:00+00:00'), '2026-08-20 10:00');
+
 assert.equal(resolveApiBase('http://127.0.0.1:8080/', 'http://localhost:8001'), 'http://localhost:8001');
 assert.equal(resolveApiBase('http://127.0.0.1:8080/?apiBase=http://127.0.0.1:9000/api/', 'http://localhost:8001'), 'http://127.0.0.1:9000');
 assert.equal(resolveApiBase('http://127.0.0.1:8080/', ''), 'http://127.0.0.1:8080');

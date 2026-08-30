@@ -74,10 +74,16 @@ allowed_origins = [
     ).split(",")
     if origin.strip()
 ]
-application = CORSMiddleware(
-    app=app,
+# Ensure common local dev origins are allowed when not explicitly configured
+for dev_origin in ("http://127.0.0.1:8000", "http://localhost:8000"):
+    if dev_origin not in allowed_origins:
+        allowed_origins.append(dev_origin)
+
+# Attach CORSMiddleware to the FastAPI app so it properly handles preflight OPTIONS
+app.add_middleware(
+    CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
@@ -269,7 +275,7 @@ def _query_memory(
                 user_id, semantic_query, list(by_id), top_k=len(by_id)
             )
             ranked_ids = [
-                int(match["memory_id"])
+                int(match["memory_id"]) 
                 for match in ranked
                 if int(match["memory_id"]) in by_id
             ]
@@ -601,4 +607,3 @@ def rebuild_memories(current_user: CurrentUser) -> dict[str, Any]:
 FRONTEND_PATH = BASE_DIR.parent / "frontend"
 if FRONTEND_PATH.exists():
     app.mount("/", StaticFiles(directory=str(FRONTEND_PATH), html=True), name="frontend")
-

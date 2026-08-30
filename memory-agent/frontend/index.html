@@ -795,6 +795,8 @@
           hour: '2-digit', minute: '2-digit', hour12: false,
         }).format(parsed).replace('/', '-').replace('/', '-');
       }
+      // No custom category creation: users choose only from existing options
+
       function renderMemories(memories) {
         memoryList.replaceChildren(); memoryCount.textContent = `${memories.length} 条`;
         if (!memories.length) {
@@ -815,21 +817,98 @@
           });
           const deleteButton = document.createElement('button');
           deleteButton.type = 'button'; deleteButton.className = 'delete'; deleteButton.textContent = '删除';
+          const editButton = document.createElement('button');
+          editButton.type = 'button'; editButton.className = 'delete'; editButton.textContent = '编辑标签';
+          editButton.style.marginLeft = '8px';
+          editButton.addEventListener('click', () => openTagEditor(memory, tags));
+          const editCategoryButton = document.createElement('button');
+          editCategoryButton.type = 'button'; editCategoryButton.className = 'delete'; editCategoryButton.textContent = '编辑分类';
+          editCategoryButton.style.marginLeft = '6px';
+          editCategoryButton.addEventListener('click', () => openCategoryEditor(memory, category));
           deleteButton.addEventListener('click', async () => {
             if (!window.confirm('确定删除这条记忆吗？')) return;
             try { await request(`/api/memory/${memory.id}`, { method: 'DELETE' }); await loadMemories(); }
             catch (error) { showError(error.message); }
           });
-          meta.append(tags, deleteButton);
+          meta.append(tags, deleteButton, editButton, editCategoryButton);
           const time = document.createElement('time'); time.className = 'memory-time'; time.textContent = formatMemoryTimestamp(memory.created_at);
           card.append(content, meta, time); memoryList.append(card);
         });
       }
+      async function openTagEditor(memory, tagsContainer) {
+        // Prevent multiple editors
+        if (tagsContainer.querySelector('input')) return;
+        const originalTags = (memory.tags || '').split(',').map(s => s.trim()).filter(Boolean);
+        tagsContainer.replaceChildren();
+        const input = document.createElement('input'); input.type = 'text'; input.value = originalTags.join(', ');
+        input.style.minWidth = '180px'; input.style.padding = '6px';
+        const save = document.createElement('button'); save.type = 'button'; save.textContent = '保存'; save.className = 'send'; save.style.marginLeft = '8px';
+        const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = '取消'; cancel.className = 'delete'; cancel.style.marginLeft = '6px';
+        tagsContainer.append(input, save, cancel);
+
+        cancel.addEventListener('click', () => { loadMemories(); });
+
+        save.addEventListener('click', async () => {
+          const raw = input.value || '';
+          const tagsArray = raw.split(',').map(s => s.trim()).filter(Boolean);
+          save.disabled = true; cancel.disabled = true; input.disabled = true;
+          try {
+            await request(`/api/memory/${memory.id}`, { method: 'PATCH', body: JSON.stringify({ tags: tagsArray }), headers: { 'Content-Type': 'application/json' } });
+            await loadMemories();
+          } catch (err) {
+            showError(err.message);
+            save.disabled = false; cancel.disabled = false; input.disabled = false;
+          }
+        });
+      }
+
+      function createCategorySelect(currentValue) {
+        const select = document.createElement('select');
+        // clone existing options only (no custom additions)
+        Array.from(memoryCategory.options).forEach((opt) => {
+          const o = document.createElement('option'); o.value = opt.value; o.textContent = opt.textContent;
+          select.append(o);
+        });
+        // choose matching option if possible
+        if (currentValue) {
+          for (const o of select.options) {
+            if (o.value === currentValue || o.textContent === currentValue) { select.value = o.value; break; }
+          }
+        }
+        return select;
+      }
+
+      async function openCategoryEditor(memory, categoryElement) {
+        // prevent multiple editors
+        if (categoryElement.querySelector('select')) return;
+        const currentLabel = categoryElement.textContent || '';
+        categoryElement.replaceChildren();
+        const select = createCategorySelect(currentLabel);
+        const save = document.createElement('button'); save.type = 'button'; save.textContent = '保存'; save.className = 'send'; save.style.marginLeft = '8px';
+        const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = '取消'; cancel.className = 'delete'; cancel.style.marginLeft = '6px';
+        categoryElement.append(select, save, cancel);
+
+        cancel.addEventListener('click', () => { loadMemories(); });
+
+        save.addEventListener('click', async () => {
+          save.disabled = true; cancel.disabled = true; select.disabled = true;
+          try {
+            const chosen = select.options[select.selectedIndex];
+            const categoryToSend = chosen && chosen.value !== '' ? chosen.value : null;
+            await request(`/api/memory/${memory.id}`, { method: 'PATCH', body: JSON.stringify({ category: categoryToSend }), headers: { 'Content-Type': 'application/json' } });
+            await loadMemories();
+          } catch (err) {
+            showError(err.message);
+            save.disabled = false; cancel.disabled = false; select.disabled = false;
+          }
+        });
+      }
+
       async function loadMemories() {
         const requestId = ++memoryRequestId;
         const parameters = new URLSearchParams({ limit: '100', offset: '0', sort_order: memorySortOrder.value });
-        if (memoryCategory.value) parameters.set('category', memoryCategory.value);
         try {
+          if (memoryCategory.value) parameters.set('category', memoryCategory.value);
           const memories = await request(`/api/memories?${parameters.toString()}`);
           if (requestId === memoryRequestId) renderMemories(memories);
         } catch (error) {
@@ -1016,7 +1095,29 @@
               }
               addMessage('assistant', renderingMessage(rendering), [], rendering);
             }
-            else addMessage('assistant', `已记住：${input}`);
+            else {
+              // Show formatted saved-memory bubble with category, time and tags
+              const mem = result.memory || null;
+              if (mem) {
+                const categoryLabels = { inspiration: '灵感', todo: '待办', knowledge: '知识点', note: '便签' };
+                const categoryName = categoryLabels[mem.category] || mem.category || '便签';
+                const message = document.createElement('article');
+                message.className = 'message assistant';
+                const avatar = document.createElement('span'); avatar.className = 'avatar'; avatar.textContent = '忆';
+                const bubble = document.createElement('div'); bubble.className = 'bubble';
+                const title = document.createElement('p'); title.textContent = `已保存为【${categoryName}】`;
+                title.style.fontWeight = '700';
+                const timeLine = document.createElement('p'); timeLine.textContent = `时间：${formatMemoryTimestamp(mem.created_at)}`;
+                const tagsLine = document.createElement('p');
+                const tagsArr = (mem.tags || '').split(',').map(s => s.trim()).filter(Boolean);
+                tagsLine.textContent = `标签：${tagsArr.join(', ') || '—'}`;
+                bubble.append(title, timeLine, tagsLine);
+                message.append(avatar, bubble);
+                chatHistory.append(message); scrollChatToBottom();
+              } else {
+                addMessage('assistant', `已记住：${input}`);
+              }
+            }
             await loadMemories();
           } else {
             addMessage('assistant', answerWithoutSources(result.answer || '暂时没有找到答案。'), result.source_memories || []);

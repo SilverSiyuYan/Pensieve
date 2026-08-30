@@ -112,6 +112,7 @@ class MemoryStoreRequest(BaseModel):
 class MemoryUpdateRequest(BaseModel):
     content: str | None = Field(default=None, min_length=1, max_length=10_000)
     tags: list[str] | None = Field(default=None, max_length=20)
+    category: str | None = Field(default=None, max_length=100)
 
 
 class MemoryQueryRequest(BaseModel):
@@ -212,7 +213,7 @@ def _store_memory(user_id: str, content: str, tags: list[str], category: str | N
     except Exception as exc:
         mark_embedding_result(user_id, memory_id, str(exc)[:500])
         raise
-    return {"success": True, "memory_id": memory_id, "message": "记忆已保存"}
+    return {"success": True, "memory_id": memory_id, "message": "记忆已保存", "memory": memory}
 
 
 def _render_saved_memory(
@@ -577,19 +578,31 @@ def edit_memory(memory_id: int, payload: MemoryUpdateRequest, current_user: Curr
     content = payload.content if "content" in payload.model_fields_set else str(memory["content"])
     tags = ",".join(payload.tags or []) if "tags" in payload.model_fields_set else memory["tags"]
     content_changed = "content" in payload.model_fields_set and content != memory["content"]
-    category = classify_memory_category(content) if content_changed else str(memory["category"])
+    category_changed = "category" in payload.model_fields_set and (payload.category is not None and str(payload.category) != str(memory["category"]))
+
+    if "category" in payload.model_fields_set and payload.category is not None:
+        # Accept explicit category (may be a preset or a custom label)
+        category = str(payload.category)
+    else:
+        category = classify_memory_category(content) if content_changed else str(memory["category"])
+
     update_memory(user_id, memory_id, content, tags, category)
     updated = get_memory(user_id, memory_id)
     assert updated is not None
+
+    # If content, tags, or category changed, update derived artifacts and vector index
     if content_changed:
         _refresh_memory_date_mentions(user_id, updated)
-        try:
+
+    try:
+        if content_changed or category_changed or ("tags" in payload.model_fields_set):
             add_to_vector(user_id, memory_id, content, {
                 "tags": tags, "category": category, "created_at": updated["created_at"]
             })
             mark_embedding_result(user_id, memory_id)
-        except Exception as exc:
-            mark_embedding_result(user_id, memory_id, str(exc)[:500])
+    except Exception as exc:
+        mark_embedding_result(user_id, memory_id, str(exc)[:500])
+
     return {"success": True, "memory": updated, "message": "记忆已更新"}
 
 

@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 import math
 import os
 from pathlib import Path
+import re
 from typing import Any
 
 from settings import APP_TIMEZONE
@@ -157,6 +158,13 @@ def _parse_json_response(content: str) -> dict[str, Any]:
 
 def classify_intent(query: str) -> dict[str, Any]:
     """Classify a message as a memory store request or a memory query."""
+    query_text = str(query).strip()
+    if re.search(
+        r"(我|我们)?(明天|这周|本周|下周|上周|今天|后天|昨天|前天).*(需要做哪些|有什么安排|有什么计划|有哪些|要做什么|安排)",
+        query_text,
+    ) or re.search(r"(需要做哪些|有什么安排|有什么计划|有哪些|要做什么)", query_text):
+        return {"intent": "query", "extracted_content": "", "extracted_tags": []}
+
     response = _get_client().chat.completions.create(
         model=_model_name(),
         messages=[

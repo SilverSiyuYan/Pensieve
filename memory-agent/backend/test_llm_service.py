@@ -68,6 +68,16 @@ def test_temporal_answer_prompt_includes_resolved_hard_filter(monkeypatch) -> No
     assert "只能根据该范围过滤后的记忆回答" in prompt
 
 
+def test_memory_prompt_converts_naive_timestamps_to_app_timezone() -> None:
+    prompt = llm_service._memory_prompt("明天要做什么", [{
+        "content": "明天交作业",
+        "tags": "工作",
+        "created_at": "2026-08-20 02:00:00",
+    }])
+
+    assert "[2026-08-20 10:00] 明天交作业" in prompt
+
+
 def test_classify_intent_parses_store_json_and_builds_prompt(monkeypatch) -> None:
     client, completions = mock_client(
         '{"intent":"store","extracted_content":"下周三交报告","extracted_tags":["下周三","工作"]}'

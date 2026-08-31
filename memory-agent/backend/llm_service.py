@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 import math
 import os
 from pathlib import Path
+import re
 from typing import Any
+
+from settings import APP_TIMEZONE
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -78,6 +81,21 @@ def _model_name() -> str:
     return os.getenv("MODEL_NAME", "qwen-plus")
 
 
+def _format_memory_timestamp_for_prompt(value: Any) -> str:
+    if value in (None, ""):
+        return "未知时间"
+    text = str(value).strip()
+    if not text:
+        return "未知时间"
+    try:
+        parsed = datetime.fromisoformat(text.replace(" ", "T"))
+    except ValueError:
+        return text
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(APP_TIMEZONE).strftime("%Y-%m-%d %H:%M")
+
+
 def _memory_prompt(
     query: str,
     retrieved_memories: list[dict[str, Any]],
@@ -94,7 +112,7 @@ def _memory_prompt(
         )
     for index, memory in enumerate(retrieved_memories, start=1):
         lines.append(
-            f"{index}. [{memory.get('created_at', '')}] {memory.get('content', '')}"
+            f"{index}. [{_format_memory_timestamp_for_prompt(memory.get('created_at', ''))}] {memory.get('content', '')}"
             f"（标签：{memory.get('tags', '')}）"
         )
         for mention in memory.get("date_mentions", []):
@@ -140,6 +158,13 @@ def _parse_json_response(content: str) -> dict[str, Any]:
 
 def classify_intent(query: str) -> dict[str, Any]:
     """Classify a message as a memory store request or a memory query."""
+    query_text = str(query).strip()
+    if re.search(
+        r"(我|我们)?(明天|这周|本周|下周|上周|今天|后天|昨天|前天).*(需要做哪些|有什么安排|有什么计划|有哪些|要做什么|安排)",
+        query_text,
+    ) or re.search(r"(需要做哪些|有什么安排|有什么计划|有哪些|要做什么)", query_text):
+        return {"intent": "query", "extracted_content": "", "extracted_tags": []}
+
     response = _get_client().chat.completions.create(
         model=_model_name(),
         messages=[

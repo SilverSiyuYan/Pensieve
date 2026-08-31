@@ -860,7 +860,7 @@
           sourceMemories.forEach((memory) => {
             const item = document.createElement('div');
             item.className = 'source-item';
-            item.textContent = `[${memory.created_at || '未知时间'}] ${memory.content}`;
+            item.textContent = `[${formatMemoryTimestamp(memory.created_at)}] ${memory.content}`;
             details.append(item);
           });
           bubble.append(details);

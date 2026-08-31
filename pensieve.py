@@ -93,7 +93,10 @@ def query_tokens(query: str) -> list:
 
 
 # ============================================================
-# 二、日期抽取（绝对日期 + 相对日期，统一换算成 YYYY-MM-DD）
+# 二、日期抽取（绝对日期 + 相对日期），对查询支持区间返回
+#    extract_date(text, prefer_range=False)
+#    - 默认 prefer_range=False：用于写入/打标，返回单个 YYYY-MM-DD 或 None
+#    - prefer_range=True：用于解析用户问题，可能返回单日字符串或 (start,end) 元组
 # ============================================================
 REL_DAYS = {'今天': 0, '明天': 1, '后天': 2, '大后天': 3,
             '昨天': -1, '前天': -2, '大前天': -3}
@@ -101,26 +104,40 @@ WEEKDAYS = {'一': 0, '二': 1, '三': 2, '四': 3, '五': 4,
             '六': 5, '日': 6, '天': 6, '末': 5}
 
 
-def extract_date(text: str, now: datetime = None):
-    """从文本中抽取一个 YYYY-MM-DD 日期；没有则返回 None。"""
+def _format(d: datetime):
+    return d.strftime('%Y-%m-%d')
+
+
+def extract_date(text: str, now: datetime = None, prefer_range: bool = False):
+    """从文本中抽取日期信息。
+
+    若 prefer_range=False（写入/打标场景），优先返回单日字符串 YYYY-MM-DD 或 None。
+    若 prefer_range=True（查询场景），当文本表示一周范围（例如"这周/本周/下周/上周/周末"）
+    时返回 (start, end) 元组，单日仍返回字符串，未识别则返回 None。
+    """
     now = now or datetime.now()
-    # 相对日：今天/明天/大前天……
+    text = text or ''
+
+    # 1) 相对日：今天/明天/后天/昨天等 -> 单日
     for word in ('大后天', '大前天', '今天', '明天', '后天', '昨天', '前天'):
         if word in text:
-            return (now + timedelta(days=REL_DAYS[word])).strftime('%Y-%m-%d')
-    # 绝对日：2024年5月1日 / 2024-05-01 / 2024/5/1
+            return _format(now + timedelta(days=REL_DAYS[word]))
+
+    # 2) 绝对日：2024年5月1日 / 2024-05-01 / 2024/5/1 -> 单日
     m = re.search(r'(\d{4})\s*[年\-/\.]\s*(\d{1,2})\s*[月\-/\.]\s*(\d{1,2})\s*[日号]?', text)
     if m:
         y, mo, d = map(int, m.groups())
         if 1 <= mo <= 12 and 1 <= d <= 31:
             return f'{y:04d}-{mo:02d}-{d:02d}'
-    # 缺省年：5月1日（默认今年）
+
+    # 3) 缺省年：5月1日 -> 单日（默认今年）
     m = re.search(r'(?<![\d\-/\.])(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]', text)
     if m:
         mo, d = map(int, m.groups())
         if 1 <= mo <= 12 and 1 <= d <= 31:
             return f'{now.year:04d}-{mo:02d}-{d:02d}'
-    # 周X / 下周X / 下下周X
+
+    # 4) 周X / 下周X / 下下周X -> 单日（例如：下周三）
     m = re.search(r'(下{1,2})?(?:周|星期)([一二三四五六日天末])', text)
     if m:
         nxt, wd = m.groups()
@@ -128,8 +145,39 @@ def extract_date(text: str, now: datetime = None):
         if nxt:
             delta += 7 * len(nxt)
         elif delta == 0:
+            # 如果写了“周三”且今天就是周三，默认取下一个同 weekday（避免歧义）
             delta = 7
-        return (now + timedelta(days=delta)).strftime('%Y-%m-%d')
+        return _format(now + timedelta(days=delta))
+
+    # 5) 周相关的区间表达（仅在 prefer_range=True 时返回区间）
+    if prefer_range:
+        low = text
+        # 判断是否用户表达了周 / 本周 / 这周 / 下周 / 上周 / 下下周 / 周末 等
+        if any(k in low for k in ('这周', '本周', '这星期', '本星期', '周内', '本周内')) or '周' in low and '这' in low:
+            week_offset = 0
+            if '下下周' in low:
+                week_offset = 2
+            elif '下周' in low:
+                week_offset = 1
+            elif '上周' in low:
+                week_offset = -1
+            else:
+                week_offset = 0
+
+            # 以周一为起始
+            start_of_this_week = now - timedelta(days=now.weekday())
+            target_start = start_of_this_week + timedelta(weeks=week_offset)
+            target_end = target_start + timedelta(days=6)
+
+            # 周末特指周六/周日
+            if any(k in low for k in ('周末', '本周末', '这周末')):
+                saturday = target_start + timedelta(days=5)
+                sunday = target_start + timedelta(days=6)
+                return (_format(saturday), _format(sunday))
+
+            return (_format(target_start), _format(target_end))
+
+    # 6) 未识别
     return None
 
 
@@ -157,12 +205,13 @@ def extract_tags(text: str) -> list:
 
 
 def rule_extract(content: str) -> dict:
-    """本地规则打标���摘要取首行，标签靠关键词，日期靠正则。"""
+    """本地规则打标：摘要取首行，标签靠关键词，日期靠正则。"""
     return {
         'summary': content.strip().split('\n')[0][:30],
         'tags': extract_tags(content),
         'people': [],
-        'event_date': extract_date(content),
+        # 写入/打标时不希望得到区间，强制 prefer_range=False
+        'event_date': extract_date(content, prefer_range=False),
     }
 
 
@@ -197,12 +246,12 @@ def llm_chat(prompt: str) -> str:
 LLM_EXTRACT_PROMPT = """你是信息打标助手。阅读用户存入的一段记忆，抽取结构化元数据。
 今天是 {today}。
 只输出 JSON，不要输出任何其他内容：
-{{
+{
   "summary": "一句话概括（不超过30字）",
   "tags": ["从以下类别选0~3个：工作/学习/生活/健康/财务/社交/账号密码/行程/想法/其他"],
   "people": ["内容中提到的人名或称呼"],
   "event_date": "内容涉及的具体日期，统一换算为 YYYY-MM-DD；相对日期（明天、下周三等）按今天换算；没有则为 null"
-}}
+}
 
 记忆内容：
 {content}"""
@@ -251,7 +300,7 @@ def llm_answer(question: str, records: list):
 
 # ============================================================
 # 五、存储层（SQLite 单文件 = 长期记忆）
-#   users        用户表（口令 PBKDF2 加密，不存明文）
+#   users        用户表（口令 PBKDF2 加盐哈希，不存明文）
 #   records      原文（写入后不可变）+ 结构化元数据 + user_id 归属
 #   records_fts  FTS5 全文索引（中文二元分词）
 # ============================================================
@@ -343,12 +392,17 @@ def add_record(conn: sqlite3.Connection, content: str, source: str = 'text',
     meta, engine = (llm_extract(content), 'LLM') if llm_available() else (None, '')
     if meta is None:                      # 无 Key 或 LLM 故障 → 规则兜底
         meta, engine = rule_extract(content), '规则'
+    # 确保 event_date 存储为字符串或 None（不允许元组）
+    ed = meta.get('event_date')
+    if isinstance(ed, tuple):
+        # 如果规则/LLM 返回了区间，取区间起始作为存储（对写入场景较为保守）
+        ed = ed[0]
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     cur = conn.execute(
         'INSERT INTO records(user_id, content, summary, tags, people, event_date, source, created_at)'
         ' VALUES (?,?,?,?,?,?,?,?)',
         (user_id, content, meta['summary'], json.dumps(meta['tags'], ensure_ascii=False),
-         json.dumps(meta['people'], ensure_ascii=False), meta['event_date'], source, now))
+         json.dumps(meta['people'], ensure_ascii=False), ed, source, now))
     rid = cur.lastrowid
     conn.execute('INSERT INTO records_fts(rowid, tokens) VALUES (?,?)',
                  (rid, ' '.join(tokenize(content))))
@@ -357,7 +411,7 @@ def add_record(conn: sqlite3.Connection, content: str, source: str = 'text',
         print(f'✅ 已存入记忆 #{rid}（用户 #{user_id}，打标引擎：{engine}）')
         print(f'   摘要：{meta["summary"]}')
         print(f'   标签：{"、".join(meta["tags"]) or "无"}　'
-              f'日期：{meta["event_date"] or "无"}　'
+              f'日期：{ed or "无"}　'
               f'人物：{"、".join(meta["people"]) or "无"}')
     return rid
 
@@ -365,7 +419,7 @@ def add_record(conn: sqlite3.Connection, content: str, source: str = 'text',
 # ---------- 记忆检索（严格按用户隔离） ----------
 def fts_search(conn: sqlite3.Connection, tokens: list, user_id: int = None, limit: int = 8):
     """全文检索：先 AND（精确），无结果再 OR（召回），按 bm25 相关度排序。
-    指定 user_id 时只检索该���户的记忆。"""
+    指定 user_id 时只检索该用户的记忆。"""
     if not tokens:
         return [], 'none'
     quoted = ['"' + t.replace('"', '') + '"' for t in tokens]
@@ -386,18 +440,26 @@ def fts_search(conn: sqlite3.Connection, tokens: list, user_id: int = None, limi
 
 
 def search(conn: sqlite3.Connection, question: str, user_id: int = None, limit: int = 5):
-    """混合召回：日期硬过滤 + 关键词全文检索，去重合并（日期命中的排前面）。
-    指定 user_id 时只在该用户的记忆范围内检索。"""
-    qdate = extract_date(question)
+    """混合召回：支持日期硬过滤（单日或区间） + 关键词全文检索，去重合并（日期命中的排前面）。"""
+    # 解析问题时允许返回区间
+    qdate = extract_date(question, prefer_range=True)
     date_rows = []
     if qdate:
-        sql = 'SELECT * FROM records WHERE event_date = ?'
-        params = [qdate]
-        if user_id is not None:
-            sql += ' AND user_id = ?'
-            params.append(user_id)
-        date_rows = list(conn.execute(
-            sql + ' ORDER BY id DESC LIMIT ?', (*params, limit)).fetchall())
+        if isinstance(qdate, tuple) and len(qdate) == 2:
+            start, end = qdate
+            sql = 'SELECT * FROM records WHERE event_date BETWEEN ? AND ?'
+            params = [start, end]
+            if user_id is not None:
+                sql += ' AND user_id = ?'
+                params.append(user_id)
+            date_rows = list(conn.execute(sql + ' ORDER BY id DESC LIMIT ?', (*params, limit)).fetchall())
+        else:
+            sql = 'SELECT * FROM records WHERE event_date = ?'
+            params = [qdate]
+            if user_id is not None:
+                sql += ' AND user_id = ?'
+                params.append(user_id)
+            date_rows = list(conn.execute(sql + ' ORDER BY id DESC LIMIT ?', (*params, limit)).fetchall())
     rows, mode = fts_search(conn, query_tokens(question), user_id=user_id, limit=limit)
     seen, results = set(), []
     for r in date_rows + list(rows):
@@ -408,7 +470,7 @@ def search(conn: sqlite3.Connection, question: str, user_id: int = None, limit: 
 
 
 # ============================================================
-# 六、查询���输出（回答铁律：只引用原文 + 标注出处 + 无则拒答）
+# 六、查询输出（回答铁律：只引用原文 + 标注出处 + 无则拒答）
 # ============================================================
 def render_record(r, prefix='——'):
     tags = '、'.join(json.loads(r['tags'])) or '无'

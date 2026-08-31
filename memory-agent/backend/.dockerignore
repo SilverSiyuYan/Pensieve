@@ -1,0 +1,9 @@
+.env
+memory.db
+chroma_data
+__pycache__
+.pytest_cache
+test_*.py
+requirements-dev.txt
+*.pyc
+
